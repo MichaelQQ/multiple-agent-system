@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 Role = Literal["proposer", "orchestrator", "implementer", "tester", "evaluator"]
 Status = Literal["success", "failure", "needs_revision"]
@@ -92,3 +92,8 @@ class MasConfig(BaseModel):
     roles: dict[Role, RoleConfig]
     proposer_signals: dict[str, Any] = Field(default_factory=dict)
     max_proposed: int = 10
+
+    @field_validator("proposer_signals", mode="before")
+    @classmethod
+    def _none_to_empty_dict(cls, v: Any) -> Any:
+        return {} if v is None else v
