@@ -1,0 +1,23 @@
+max_proposed: 10
+
+providers:
+  claude-code:
+    cli: claude
+    max_concurrent: 2
+    extra_args: []
+  codex:
+    cli: codex
+    max_concurrent: 1
+    extra_args: []
+  gemini:
+    cli: gemini
+    max_concurrent: 1
+    extra_args: []
+  ollama:
+    cli: ollama
+    max_concurrent: 4
+    extra_args: []
+
+proposer_signals:
+  # Optional command to run for CI/test output (stdout+stderr sampled).
+  # ci_command: ["pytest", "-x", "-q"]

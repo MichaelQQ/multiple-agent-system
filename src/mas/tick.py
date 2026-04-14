@@ -1,0 +1,350 @@
+from __future__ import annotations
+
+import errno
+import fcntl
+import json
+import logging
+import os
+import shutil
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable
+
+from . import board, worktree
+from .adapters import get_adapter
+from .config import load_config, project_root, project_dir
+from .ids import task_id as new_task_id
+from .roles import gather_proposer_signals, parse_plan, render_prompt
+from .schemas import MasConfig, Plan, Role, Task
+
+log = logging.getLogger("mas.tick")
+
+
+class LockBusy(RuntimeError):
+    pass
+
+
+@dataclass
+class TickEnv:
+    repo: Path
+    mas: Path
+    cfg: MasConfig
+
+
+def _acquire_lock(mas_dir: Path):
+    mas_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = mas_dir / "tick.lock"
+    fh = lock_path.open("a+")
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as e:
+        fh.close()
+        if e.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
+            raise LockBusy("another tick is running")
+        raise
+    return fh
+
+
+def run_tick(*, start: Path | None = None) -> None:
+    repo = project_root(start)
+    mas = project_dir(start)
+    cfg = load_config(mas)
+    env = TickEnv(repo=repo, mas=mas, cfg=cfg)
+    board.ensure_layout(mas)
+
+    try:
+        lock = _acquire_lock(mas)
+    except LockBusy:
+        log.info("tick skipped: another tick holds the lock")
+        return
+
+    try:
+        _reap_workers(env)
+        _advance_doing(env)
+        _maybe_dispatch_proposer(env)
+    finally:
+        lock.close()
+
+
+# --- 1. Reap ----------------------------------------------------------------
+
+
+def _reap_workers(env: TickEnv) -> None:
+    """No-op beyond pid bookkeeping: board.count_active_pids already clears dead
+    PID files. Detached workers write result.json themselves before exit."""
+    board.count_active_pids(env.mas)
+
+
+# --- 2. Advance -------------------------------------------------------------
+
+
+def _advance_doing(env: TickEnv) -> None:
+    for task_dir_ in board.list_column(env.mas, "doing"):
+        try:
+            _advance_one(env, task_dir_)
+        except Exception:
+            log.exception("advance failed for %s", task_dir_.name)
+
+
+def _advance_one(env: TickEnv, parent_dir: Path) -> None:
+    parent_task = board.read_task(parent_dir)
+
+    # Proposer runs transiently in doing/. Once it emits a result, archive it
+    # to done/ without creating a worktree or spawning an orchestrator.
+    if parent_task.role == "proposer":
+        if board.read_result(parent_dir) is not None:
+            dst = env.mas / "tasks" / "done" / parent_task.id
+            board.move(parent_dir, dst)
+        return
+
+    plan_path = parent_dir / "plan.json"
+    wt = parent_dir / "worktree"
+
+    if not wt.exists():
+        worktree.create(env.repo, parent_task.id, wt)
+
+    if not plan_path.exists():
+        # Dispatch orchestrator (skipped if one is already running).
+        pid_dir = parent_dir / "pids"
+        if _role_running(pid_dir, "orchestrator"):
+            return
+        _dispatch_role(env, parent_task, parent_dir, wt, role="orchestrator")
+        return
+
+    plan = parse_plan(plan_path, parent_task.id)
+    subtasks_root = parent_dir / "subtasks"
+    subtasks_root.mkdir(exist_ok=True)
+
+    # Sequential: find first subtask without successful result.
+    next_child = _next_ready_child(plan, subtasks_root)
+    if next_child is None:
+        if _all_children_passed(plan, subtasks_root):
+            _finalize_parent(env, parent_dir, parent_task)
+        return
+
+    child_dir = subtasks_root / next_child.id
+    child_dir.mkdir(parents=True, exist_ok=True)
+
+    # If a worker is running for this child, wait.
+    if _role_running(child_dir / "pids", next_child.role):
+        return
+
+    # If child has result, apply verdict / advance.
+    result = board.read_result(child_dir)
+    if result is not None:
+        _handle_child_result(env, parent_dir, parent_task, plan, next_child, result)
+        return
+
+    # Otherwise, dispatch the child.
+    child_task = Task(
+        id=next_child.id,
+        parent_id=parent_task.id,
+        role=next_child.role,
+        goal=next_child.goal,
+        inputs=next_child.inputs,
+        constraints=next_child.constraints,
+        cycle=parent_task.cycle,
+    )
+    _dispatch_role(env, child_task, child_dir, wt, role=next_child.role)
+
+
+def _role_running(pid_dir: Path, role: str) -> bool:
+    if not pid_dir.exists():
+        return False
+    for p in pid_dir.glob(f"{role}.*.pid"):
+        try:
+            pid = int(p.read_text().strip())
+        except (ValueError, OSError):
+            p.unlink(missing_ok=True)
+            continue
+        if _pid_alive(pid):
+            return True
+        p.unlink(missing_ok=True)
+    return False
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except OSError as e:
+        return e.errno == errno.EPERM
+    return True
+
+
+def _next_ready_child(plan: Plan, subtasks_root: Path):
+    for spec in plan.subtasks:
+        child_dir = subtasks_root / spec.id
+        result = board.read_result(child_dir) if child_dir.exists() else None
+        if result is None:
+            return spec
+        if result.status == "success" and (spec.role != "evaluator" or result.verdict == "pass"):
+            continue
+        # Found one that needs attention (failure / needs_revision / evaluator fail)
+        return spec
+    return None
+
+
+def _all_children_passed(plan: Plan, subtasks_root: Path) -> bool:
+    for spec in plan.subtasks:
+        result = board.read_result(subtasks_root / spec.id)
+        if result is None or result.status != "success":
+            return False
+        if spec.role == "evaluator" and result.verdict != "pass":
+            return False
+    return True
+
+
+def _handle_child_result(env, parent_dir, parent_task, plan, spec, result):
+    # Success path: mark and move on (by next tick).
+    if result.status == "success" and (spec.role != "evaluator" or result.verdict == "pass"):
+        return
+
+    # Evaluator verdict handling
+    if spec.role == "evaluator" and result.verdict == "needs_revision":
+        _append_revision_cycle(parent_dir, plan, parent_task, feedback=result.feedback or "")
+        return
+
+    # Failure: retry up to max_retries
+    attempts_path = (parent_dir / "subtasks" / spec.id / ".attempt").resolve()
+    attempt = int(attempts_path.read_text()) if attempts_path.exists() else 1
+    role_cfg = env.cfg.roles[spec.role]
+    if attempt < (role_cfg.max_retries + 1):
+        # Bump attempt and clear result so next tick redispatches with previous_failure.
+        attempts_path.write_text(str(attempt + 1))
+        child_dir = parent_dir / "subtasks" / spec.id
+        (child_dir / "result.json").rename(child_dir / f"result.failed-{attempt}.json")
+        # Write a marker so the next dispatch picks it up as previous_failure.
+        (child_dir / ".previous_failure").write_text(result.summary + ("\n" + (result.feedback or "")))
+        return
+
+    # Retries exhausted → move parent to failed/
+    failed_dir = env.mas / "tasks" / "failed" / parent_task.id
+    board.move(parent_dir, failed_dir)
+
+
+def _append_revision_cycle(parent_dir: Path, plan: Plan, parent_task, feedback: str) -> None:
+    from .schemas import SubtaskSpec
+
+    # Bound by plan.max_revision_cycles
+    existing_cycles = sum(1 for s in plan.subtasks if s.id.startswith("rev-"))
+    if existing_cycles >= plan.max_revision_cycles:
+        return
+
+    cycle_n = existing_cycles + 1
+    base_inputs = {"feedback": feedback, "parent_goal": parent_task.goal}
+    new_children = [
+        SubtaskSpec(id=f"rev-{cycle_n}-implementer", role="implementer",
+                    goal=f"Address evaluator feedback (cycle {cycle_n})", inputs=base_inputs),
+        SubtaskSpec(id=f"rev-{cycle_n}-tester", role="tester",
+                    goal=f"Verify revision {cycle_n}", inputs=base_inputs),
+        SubtaskSpec(id=f"rev-{cycle_n}-evaluator", role="evaluator",
+                    goal=f"Evaluate revision {cycle_n}", inputs=base_inputs),
+    ]
+    plan.subtasks.extend(new_children)
+    (parent_dir / "plan.json").write_text(plan.model_dump_json(indent=2))
+
+
+def _finalize_parent(env: TickEnv, parent_dir: Path, parent_task) -> None:
+    wt = parent_dir / "worktree"
+    worktree.prune(env.repo, wt, keep_branch=True)
+    dst = env.mas / "tasks" / "done" / parent_task.id
+    board.move(parent_dir, dst)
+
+
+# --- 3. Proposer ------------------------------------------------------------
+
+
+def _maybe_dispatch_proposer(env: TickEnv) -> None:
+    proposed = board.list_column(env.mas, "proposed")
+    if len(proposed) >= env.cfg.max_proposed:
+        return
+
+    # Already a proposer running?
+    for p in env.mas.glob("tasks/doing/*/pids/proposer.*.pid"):
+        if _pid_alive(int(p.read_text().strip())):
+            return
+
+    # Check provider concurrency cap
+    role_cfg = env.cfg.roles["proposer"]
+    prov_cfg = env.cfg.providers[role_cfg.provider]
+    if board.count_active_pids(env.mas, role_cfg.provider) >= prov_cfg.max_concurrent:
+        return
+
+    ideas = env.mas / "ideas.md"
+    ci_cmd = env.cfg.proposer_signals.get("ci_command")
+    signals = gather_proposer_signals(
+        env.repo,
+        ideas_path=ideas,
+        ci_command=ci_cmd,
+    )
+    goal = "Propose a new task for the board"
+    tid = new_task_id(goal)
+    task = Task(
+        id=tid,
+        role="proposer",
+        goal=goal,
+        inputs={"signals": signals},
+    )
+    # Proposer runs in a transient workspace inside doing/; proposals it emits
+    # go to .mas/tasks/proposed/.
+    tdir = env.mas / "tasks" / "doing" / tid
+    board.write_task(tdir, task)
+    _dispatch_role(env, task, tdir, env.repo, role="proposer")
+
+
+# --- Dispatch helper --------------------------------------------------------
+
+
+def _dispatch_role(
+    env: TickEnv,
+    task: Task,
+    task_dir: Path,
+    cwd: Path,
+    *,
+    role: Role,
+) -> None:
+    role_cfg = env.cfg.roles[role]
+    prov_cfg = env.cfg.providers[role_cfg.provider]
+
+    # Respect provider concurrency cap.
+    if board.count_active_pids(env.mas, role_cfg.provider) >= prov_cfg.max_concurrent:
+        return
+
+    adapter_cls = get_adapter(role_cfg.provider)
+    adapter = adapter_cls(prov_cfg, role_cfg)
+
+    # Inject previous_failure marker if present.
+    pf = task_dir / ".previous_failure"
+    if pf.exists():
+        task.previous_failure = pf.read_text()
+        pf.unlink()
+
+    board.write_task(task_dir, task)
+
+    # Render prompt
+    prompt_path = env.mas / "prompts" / f"{role}.md"
+    if not prompt_path.exists():
+        log.warning("missing prompt template %s; using goal", prompt_path)
+        prompt = task.goal
+    else:
+        prompt = render_prompt(
+            prompt_path,
+            task,
+            task_dir=str(task_dir),
+            worktree=str(cwd),
+            mas_dir=str(env.mas),
+        )
+
+    attempt = task.attempt
+    log_path = task_dir / "logs" / f"{role}-{attempt}.log"
+
+    stdin_text = prompt if not adapter.agentic else None
+    handle = adapter.dispatch(
+        prompt=prompt,
+        task_dir=task_dir,
+        cwd=cwd,
+        log_path=log_path,
+        role=role,
+        stdin_text=stdin_text,
+    )
+    board.write_pid(task_dir / "pids", role, role_cfg.provider, handle.pid)

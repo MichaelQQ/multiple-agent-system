@@ -1,0 +1,30 @@
+roles:
+  proposer:
+    provider: claude-code
+    model: claude-haiku-4-5-20251001
+    timeout_s: 600
+    max_retries: 2
+    allowed_tools: [Read, Grep, Glob]
+    permission_mode: readOnly
+  orchestrator:
+    provider: claude-code
+    model: claude-opus-4-6
+    timeout_s: 1200
+    max_retries: 2
+    allowed_tools: [Read, Grep, Glob, Write]
+    permission_mode: default
+  implementer:
+    provider: codex
+    timeout_s: 3600
+    max_retries: 2
+  tester:
+    provider: gemini
+    timeout_s: 1800
+    max_retries: 2
+  evaluator:
+    provider: ollama
+    model: llama3.2
+    timeout_s: 600
+    max_retries: 1
+    allowed_tools: [Read, Grep, Glob]
+    permission_mode: readOnly
