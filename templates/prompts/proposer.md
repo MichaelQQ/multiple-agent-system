@@ -27,8 +27,8 @@ Write a JSON file at `$task_dir/result.json` with:
 - `artifacts`: []
 - `duration_s`: <seconds you spent>
 
-Additionally, write the proposal itself as `task.json` (a Task) into
-`$mas_dir/tasks/proposed/<new-id>/` where `<new-id>` follows the format
-`YYYYMMDD-slug-xxxx`. Keep proposals narrow, concrete, and testable.
+Do not create any other files. The tick loop materializes the proposal
+card under `$mas_dir/tasks/proposed/` from your `handoff`. Keep proposals
+narrow, concrete, and testable.
 
 $result_schema

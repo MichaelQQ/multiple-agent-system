@@ -101,6 +101,8 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
             return
         if result is not None:
             col = "done" if result.status == "success" else "failed"
+            if result.status == "success":
+                _materialize_proposal(env, result)
             board.move(parent_dir, env.mas / "tasks" / col / parent_task.id)
             return
         # Never dispatched (no log file, no result) — dispatch now.
@@ -336,6 +338,41 @@ def _finalize_parent(env: TickEnv, parent_dir: Path, parent_task) -> None:
 
 
 # --- 3. Proposer ------------------------------------------------------------
+
+
+def _materialize_proposal(env: TickEnv, result: Result) -> None:
+    """Turn a successful proposer result.handoff into a proposed/ task card.
+
+    Agentic providers can write the task.json themselves; non-agentic ones
+    (Ollama) only emit result.json, so the tick loop materializes the card
+    from handoff."""
+    handoff = result.handoff or {}
+    goal = handoff.get("goal") or result.summary
+    if not goal:
+        log.warning("proposer %s: no goal in handoff, skipping materialization", result.task_id)
+        return
+    if len(board.list_column(env.mas, "proposed")) >= env.cfg.max_proposed:
+        return
+
+    inputs: dict = {}
+    if handoff.get("rationale"):
+        inputs["rationale"] = handoff["rationale"]
+    for key in ("acceptance", "suggested_changes"):
+        if handoff.get(key):
+            inputs[key] = handoff[key]
+
+    tid = new_task_id(goal)
+    target = env.mas / "tasks" / "proposed" / tid
+    if target.exists():
+        tid = new_task_id(goal, salt=result.task_id)
+        target = env.mas / "tasks" / "proposed" / tid
+        if target.exists():
+            log.warning("proposer %s: proposed/%s already exists, skipping", result.task_id, tid)
+            return
+
+    task = Task(id=tid, role="orchestrator", goal=goal, inputs=inputs)
+    board.write_task(target, task)
+    log.info("proposer %s: materialized proposal %s", result.task_id, tid)
 
 
 def _maybe_dispatch_proposer(env: TickEnv) -> None:

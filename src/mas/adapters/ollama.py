@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 import sys
 import textwrap
@@ -14,12 +13,17 @@ class OllamaAdapter(Adapter):
     """Non-agentic text provider.
 
     Launches a detached Python wrapper that:
-      1. Pipes the prompt to ``ollama run <model>``
-      2. Extracts the first JSON object from the response
-      3. Writes it as ``result.json`` in ``task_dir``
+      1. POSTs the prompt to the Ollama HTTP API with ``format=json`` so
+         the model is constrained to produce valid JSON.
+      2. Writes the response as ``result.json`` in ``task_dir``.
 
-    If JSON extraction fails the wrapper writes a failure result so the
-    orchestrator can retry rather than waiting for orphan detection.
+    Host is read from ``OLLAMA_HOST`` (default ``http://localhost:11434``).
+    Token budget is controlled by ``MAS_OLLAMA_NUM_PREDICT`` and
+    ``MAS_OLLAMA_NUM_CTX`` env vars.
+
+    If the response cannot be parsed as JSON the wrapper writes a failure
+    result so the orchestrator can retry rather than waiting for orphan
+    detection.
     """
 
     name = "ollama"
@@ -51,13 +55,13 @@ class OllamaAdapter(Adapter):
         extra = list(self.provider_cfg.extra_args)
 
         base_prompt = stdin_text if stdin_text is not None else prompt
-        # Non-agentic: model cannot write files — instruct it to reply with
-        # the result JSON directly so the wrapper can extract it.
+        # Non-agentic: model cannot write files. The HTTP call uses
+        # format=json so the model is constrained to emit a JSON object;
+        # we still tell it what that object should represent.
         effective_prompt = (
             base_prompt
-            + "\n\nIMPORTANT: You cannot write files. Respond with ONLY a "
-            "valid JSON object (no markdown prose, no extra text) that "
-            "represents result.json for this task."
+            + "\n\nYou cannot write files. Your entire response must be a "
+            "single JSON object representing result.json for this task."
         )
 
         wrapper_path = task_dir / "_ollama_wrapper.py"
@@ -108,94 +112,113 @@ class OllamaAdapter(Adapter):
 
     @staticmethod
     def _wrapper_source() -> str:
-        return textwrap.dedent("""\
-            import json, os, re, subprocess, sys
+        return textwrap.dedent("""
+            import json, os, re, sys, time, urllib.request, urllib.error
 
-            _FENCED_JSON_RE = re.compile("```(?:json)?[ \\t\\n]*(\\{[^\\x00-\\x1f]*?\\})[ \\t\\n]*```")
-            _BARE_JSON_RE = re.compile("(\\{[\\s\\S]*\\})")
+            _BARE_JSON_RE = re.compile(r"(\\{[\\s\\S]*\\})")
+
+            def _write_failure(task_dir, summary, feedback):
+                result = {
+                    "task_id": os.path.basename(task_dir),
+                    "status": "failure",
+                    "summary": summary,
+                    "artifacts": [],
+                    "handoff": None,
+                    "verdict": None,
+                    "feedback": feedback,
+                    "tokens_in": None,
+                    "tokens_out": None,
+                    "duration_s": 0.0,
+                    "cost_usd": None,
+                }
+                out_path = os.path.join(task_dir, "result.json")
+                with open(out_path, "w") as fh:
+                    json.dump(result, fh, indent=2)
+                return out_path
 
             _cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_ollama_config.json")
             with open(_cfg_path) as _f:
                 cfg = json.load(_f)
-            cli, model, extra_args = cfg["cli"], cfg["model"], cfg["extra_args"]
+            model = cfg["model"]
             prompt, task_dir, role = cfg["prompt"], cfg["task_dir"], cfg["role"]
 
-            cmd = [cli, "run", model] + extra_args
-            print(f"[ollama-wrapper] running {' '.join(cmd)}", flush=True)
+            host = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+            if not host.startswith("http"):
+                host = "http://" + host
+            num_predict = int(os.environ.get("MAS_OLLAMA_NUM_PREDICT", "4096"))
+            num_ctx = int(os.environ.get("MAS_OLLAMA_NUM_CTX", "8192"))
+            temperature = float(os.environ.get("MAS_OLLAMA_TEMPERATURE", "0.2"))
 
+            body = {
+                "model": model,
+                "prompt": prompt,
+                "format": "json",
+                "stream": False,
+                "options": {
+                    "num_predict": num_predict,
+                    "num_ctx": num_ctx,
+                    "temperature": temperature,
+                },
+            }
+            url = host + "/api/generate"
+            print(
+                f"[ollama-wrapper] POST {url} model={model} "
+                f"num_predict={num_predict} num_ctx={num_ctx}",
+                flush=True,
+            )
+
+            started = time.time()
             try:
-                r = subprocess.run(
-                    cmd,
-                    input=prompt,
-                    capture_output=True,
-                    text=True,
-                    timeout=3600,
+                req = urllib.request.Request(
+                    url,
+                    data=json.dumps(body).encode(),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
                 )
+                with urllib.request.urlopen(req, timeout=3600) as resp:
+                    payload = json.loads(resp.read().decode())
             except Exception as exc:
-                result = {{
-                    "task_id": os.path.basename(task_dir),
-                    "status": "failure",
-                    "summary": f"ollama invocation failed: {exc}",
-                    "artifacts": [],
-                    "handoff": None,
-                    "verdict": None,
-                    "feedback": str(exc),
-                    "tokens_in": None,
-                    "tokens_out": None,
-                    "duration_s": 0.0,
-                    "cost_usd": None,
-                }}
-                out_path = os.path.join(task_dir, "result.json")
-                with open(out_path, "w") as fh:
-                    json.dump(result, fh, indent=2)
-                print(f"[ollama-wrapper] wrote failure result.json (invocation error)", flush=True)
+                _write_failure(task_dir, f"ollama HTTP call failed: {exc}", str(exc))
+                print(f"[ollama-wrapper] wrote failure result.json (http error: {exc})", flush=True)
                 sys.exit(1)
 
-            raw = r.stdout
-            if r.stderr:
-                print("[ollama-wrapper] stderr:", r.stderr[:2000], flush=True)
-            print(f"[ollama-wrapper] raw output ({len(raw)} chars):", flush=True)
+            duration = time.time() - started
+            raw = payload.get("response", "") or ""
+            done_reason = payload.get("done_reason")
+            prompt_eval_count = payload.get("prompt_eval_count")
+            eval_count = payload.get("eval_count")
+            print(
+                f"[ollama-wrapper] done reason={done_reason} "
+                f"prompt_eval={prompt_eval_count} eval={eval_count} "
+                f"response_chars={len(raw)} duration_s={duration:.1f}",
+                flush=True,
+            )
             print(raw[:4000], flush=True)
 
-            # Extract JSON: prefer fenced block, fall back to first bare object.
             data = None
-            m = _FENCED_JSON_RE.search(raw)
-            if m:
-                candidate = m.group(1)
-            else:
-                m = _BARE_JSON_RE.search(raw)
-                candidate = m.group(1) if m else None
-
-            if candidate:
+            if raw:
                 try:
-                    data = json.loads(candidate)
+                    data = json.loads(raw)
                 except json.JSONDecodeError:
-                    # Try trimming trailing garbage
-                    for end in range(len(candidate), 0, -1):
-                        try:
-                            data = json.loads(candidate[:end])
-                            break
-                        except json.JSONDecodeError:
-                            pass
+                    m = _BARE_JSON_RE.search(raw)
+                    if m:
+                        candidate = m.group(1)
+                        for end in range(len(candidate), 0, -1):
+                            try:
+                                data = json.loads(candidate[:end])
+                                break
+                            except json.JSONDecodeError:
+                                pass
 
             if not isinstance(data, dict) or "status" not in data:
-                result = {{
-                    "task_id": os.path.basename(task_dir),
-                    "status": "failure",
-                    "summary": "ollama response contained no valid result JSON",
-                    "artifacts": [],
-                    "handoff": None,
-                    "verdict": None,
-                    "feedback": raw[:3000],
-                    "tokens_in": None,
-                    "tokens_out": None,
-                    "duration_s": 0.0,
-                    "cost_usd": None,
-                }}
-                out_path = os.path.join(task_dir, "result.json")
-                with open(out_path, "w") as fh:
-                    json.dump(result, fh, indent=2)
-                print("[ollama-wrapper] wrote failure result.json (no JSON found)", flush=True)
+                truncated = done_reason and done_reason != "stop"
+                reason = "truncated output" if truncated else "no valid result JSON"
+                _write_failure(
+                    task_dir,
+                    f"ollama response had {reason} (done_reason={done_reason})",
+                    raw[:3000],
+                )
+                print(f"[ollama-wrapper] wrote failure result.json ({reason})", flush=True)
                 sys.exit(1)
 
             data.setdefault("task_id", os.path.basename(task_dir))
@@ -203,9 +226,9 @@ class OllamaAdapter(Adapter):
             data.setdefault("handoff", None)
             data.setdefault("verdict", None)
             data.setdefault("feedback", None)
-            data.setdefault("tokens_in", None)
-            data.setdefault("tokens_out", None)
-            data.setdefault("duration_s", 0.0)
+            data["tokens_in"] = prompt_eval_count if data.get("tokens_in") is None else data["tokens_in"]
+            data["tokens_out"] = eval_count if data.get("tokens_out") is None else data["tokens_out"]
+            data["duration_s"] = duration if not data.get("duration_s") else data["duration_s"]
             data.setdefault("cost_usd", None)
 
             out_path = os.path.join(task_dir, "result.json")
