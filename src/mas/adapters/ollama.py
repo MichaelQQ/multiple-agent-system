@@ -111,6 +111,9 @@ class OllamaAdapter(Adapter):
         return textwrap.dedent("""\
             import json, os, re, subprocess, sys
 
+            _FENCED_JSON_RE = re.compile("```(?:json)?[ \\t\\n]*(\\{[^\\x00-\\x1f]*?\\})[ \\t\\n]*```")
+            _BARE_JSON_RE = re.compile("(\\{[\\s\\S]*\\})")
+
             _cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_ollama_config.json")
             with open(_cfg_path) as _f:
                 cfg = json.load(_f)
@@ -118,7 +121,7 @@ class OllamaAdapter(Adapter):
             prompt, task_dir, role = cfg["prompt"], cfg["task_dir"], cfg["role"]
 
             cmd = [cli, "run", model] + extra_args
-            print(f"[ollama-wrapper] running {{' '.join(cmd)}}", flush=True)
+            print(f"[ollama-wrapper] running {' '.join(cmd)}", flush=True)
 
             try:
                 r = subprocess.run(
@@ -132,7 +135,7 @@ class OllamaAdapter(Adapter):
                 result = {{
                     "task_id": os.path.basename(task_dir),
                     "status": "failure",
-                    "summary": f"ollama invocation failed: {{exc}}",
+                    "summary": f"ollama invocation failed: {exc}",
                     "artifacts": [],
                     "handoff": None,
                     "verdict": None,
@@ -151,16 +154,16 @@ class OllamaAdapter(Adapter):
             raw = r.stdout
             if r.stderr:
                 print("[ollama-wrapper] stderr:", r.stderr[:2000], flush=True)
-            print(f"[ollama-wrapper] raw output ({{len(raw)}} chars):", flush=True)
+            print(f"[ollama-wrapper] raw output ({len(raw)} chars):", flush=True)
             print(raw[:4000], flush=True)
 
             # Extract JSON: prefer fenced block, fall back to first bare object.
             data = None
-            m = re.search(r"```(?:json)?\\s*(\\{{[\\s\\S]*?\\}})\\s*```", raw)
+            m = _FENCED_JSON_RE.search(raw)
             if m:
                 candidate = m.group(1)
             else:
-                m = re.search(r"(\\{{[\\s\\S]*\\}})", raw)
+                m = _BARE_JSON_RE.search(raw)
                 candidate = m.group(1) if m else None
 
             if candidate:
@@ -208,5 +211,5 @@ class OllamaAdapter(Adapter):
             out_path = os.path.join(task_dir, "result.json")
             with open(out_path, "w") as fh:
                 json.dump(data, fh, indent=2)
-            print(f"[ollama-wrapper] wrote result.json with status={{data.get('status')}}", flush=True)
+            print(f"[ollama-wrapper] wrote result.json with status={data.get('status')}", flush=True)
         """)
