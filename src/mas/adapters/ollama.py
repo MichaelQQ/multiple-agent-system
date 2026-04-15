@@ -221,7 +221,21 @@ class OllamaAdapter(Adapter):
                 print(f"[ollama-wrapper] wrote failure result.json ({reason})", flush=True)
                 sys.exit(1)
 
+            # Normalize to Result schema (extra=forbid). Map common aliases
+            # and drop unknown keys so pydantic validation succeeds downstream.
+            if "summary" not in data:
+                for alias in ("message", "title", "description"):
+                    if isinstance(data.get(alias), str):
+                        data["summary"] = data.pop(alias)
+                        break
+            allowed = {
+                "task_id", "status", "summary", "artifacts", "handoff",
+                "verdict", "feedback", "tokens_in", "tokens_out",
+                "duration_s", "cost_usd",
+            }
+            data = {k: v for k, v in data.items() if k in allowed}
             data.setdefault("task_id", os.path.basename(task_dir))
+            data.setdefault("summary", f"{role} returned no summary")
             data.setdefault("artifacts", [])
             data.setdefault("handoff", None)
             data.setdefault("verdict", None)

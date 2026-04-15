@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 from mas.adapters.ollama import OllamaAdapter
+from mas.schemas import Result
 
 
 class _MockOllama:
@@ -187,6 +188,46 @@ def test_wrapper_recovers_json_from_wrapped_response(tmp_path, mock_ollama):
     result = _read_result(task_dir)
     assert result["status"] == "success"
     assert result["summary"] == "hi"
+
+
+def test_wrapper_maps_message_alias_to_summary(tmp_path, mock_ollama):
+    # Models sometimes emit "message" instead of "summary"; wrapper should
+    # rename it so the Result schema (extra=forbid, summary required) validates.
+    mock_ollama.response_payload = {
+        "response": json.dumps(
+            {"status": "success", "message": "did the thing"}
+        ),
+        "done_reason": "stop",
+    }
+    task_dir, proc = _run_wrapper(tmp_path, mock_ollama.url)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+    result = _read_result(task_dir)
+    assert result["summary"] == "did the thing"
+    assert "message" not in result
+    # Must validate against the real Result schema.
+    Result.model_validate(result)
+
+
+def test_wrapper_drops_unknown_keys(tmp_path, mock_ollama):
+    mock_ollama.response_payload = {
+        "response": json.dumps(
+            {
+                "status": "success",
+                "summary": "ok",
+                "notes": "extra chatter",
+                "random_field": 42,
+            }
+        ),
+        "done_reason": "stop",
+    }
+    task_dir, proc = _run_wrapper(tmp_path, mock_ollama.url)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+    result = _read_result(task_dir)
+    assert "notes" not in result
+    assert "random_field" not in result
+    Result.model_validate(result)
 
 
 def test_wrapper_missing_status_field_writes_failure(tmp_path, mock_ollama):
