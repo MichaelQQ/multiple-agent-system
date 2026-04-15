@@ -15,7 +15,7 @@ from .adapters import get_adapter
 from .config import load_config, project_root, project_dir
 from .ids import task_id as new_task_id
 from .roles import gather_proposer_signals, parse_plan, render_prompt
-from .schemas import MasConfig, Plan, Role, Task
+from .schemas import MasConfig, Plan, Result, Role, Task
 
 log = logging.getLogger("mas.tick")
 
@@ -89,12 +89,18 @@ def _advance_doing(env: TickEnv) -> None:
 def _advance_one(env: TickEnv, parent_dir: Path) -> None:
     parent_task = board.read_task(parent_dir)
 
-    # Proposer runs transiently in doing/. Once it emits a result, archive it
-    # to done/ without creating a worktree or spawning an orchestrator.
+    # Proposer runs transiently in doing/. Archive on terminal state; also
+    # handle the case where the worker exited without writing result.json
+    # (crash, usage-limit, etc.) so it doesn't sit in doing/ forever.
     if parent_task.role == "proposer":
-        if board.read_result(parent_dir) is not None:
-            dst = env.mas / "tasks" / "done" / parent_task.id
-            board.move(parent_dir, dst)
+        result = board.read_result(parent_dir)
+        if result is None and _worker_orphaned(parent_dir, "proposer", parent_task.attempt):
+            failed_dir = env.mas / "tasks" / "failed" / parent_task.id
+            board.move(parent_dir, failed_dir)
+            return
+        if result is not None:
+            col = "done" if result.status == "success" else "failed"
+            board.move(parent_dir, env.mas / "tasks" / col / parent_task.id)
         return
 
     plan_path = parent_dir / "plan.json"
@@ -104,10 +110,14 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
         worktree.create(env.repo, parent_task.id, wt)
 
     if not plan_path.exists():
-        # Dispatch orchestrator (skipped if one is already running).
         pid_dir = parent_dir / "pids"
         if _role_running(pid_dir, "orchestrator"):
             return
+        orch_attempt = _read_attempt(parent_dir / ".orchestrator_attempt")
+        if _worker_orphaned(parent_dir, "orchestrator", orch_attempt):
+            _retry_or_fail_orchestrator(env, parent_dir, parent_task, orch_attempt)
+            return
+        parent_task.attempt = orch_attempt
         _dispatch_role(env, parent_task, parent_dir, wt, role="orchestrator")
         return
 
@@ -125,17 +135,22 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
     child_dir = subtasks_root / next_child.id
     child_dir.mkdir(parents=True, exist_ok=True)
 
-    # If a worker is running for this child, wait.
     if _role_running(child_dir / "pids", next_child.role):
         return
 
-    # If child has result, apply verdict / advance.
+    child_attempt = _read_attempt(child_dir / ".attempt")
+
     result = board.read_result(child_dir)
+    # Orphan: worker previously dispatched (log for current attempt exists) but
+    # left no result.json and no live pid. Synthesize a failure so the retry /
+    # fail-parent path in _handle_child_result takes over.
+    if result is None and _worker_orphaned(child_dir, next_child.role, child_attempt):
+        result = _synthesize_orphan_result(child_dir, next_child.id, next_child.role, child_attempt)
+
     if result is not None:
         _handle_child_result(env, parent_dir, parent_task, plan, next_child, result)
         return
 
-    # Otherwise, dispatch the child.
     child_task = Task(
         id=next_child.id,
         parent_id=parent_task.id,
@@ -144,8 +159,62 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
         inputs=next_child.inputs,
         constraints=next_child.constraints,
         cycle=parent_task.cycle,
+        attempt=child_attempt,
     )
     _dispatch_role(env, child_task, child_dir, wt, role=next_child.role)
+
+
+def _read_attempt(path: Path) -> int:
+    if not path.exists():
+        return 1
+    try:
+        return int(path.read_text().strip())
+    except (ValueError, OSError):
+        return 1
+
+
+def _worker_orphaned(task_dir: Path, role: str, attempt: int) -> bool:
+    """A worker for (role, attempt) was dispatched but is no longer running
+    and left no result. Identified by the presence of its per-attempt log
+    without a live pid. Caller must ensure no result.json exists."""
+    log_path = task_dir / "logs" / f"{role}-{attempt}.log"
+    if not log_path.exists():
+        return False
+    return not _role_running(task_dir / "pids", role)
+
+
+def _read_log_tail(task_dir: Path, role: str, attempt: int, lines: int = 20) -> str:
+    p = task_dir / "logs" / f"{role}-{attempt}.log"
+    try:
+        text = p.read_text()
+    except OSError:
+        return ""
+    return "\n".join(text.splitlines()[-lines:])
+
+
+def _synthesize_orphan_result(task_dir: Path, task_id: str, role: str, attempt: int) -> Result:
+    tail = _read_log_tail(task_dir, role, attempt)
+    r = Result(
+        task_id=task_id,
+        status="failure",
+        summary=f"{role} exited without writing result.json",
+        feedback=(f"log tail:\n{tail}" if tail else None),
+        duration_s=0.0,
+    )
+    (task_dir / "result.json").write_text(r.model_dump_json(indent=2))
+    return r
+
+
+def _retry_or_fail_orchestrator(env: TickEnv, parent_dir: Path, parent_task: Task, attempt: int) -> None:
+    role_cfg = env.cfg.roles["orchestrator"]
+    if attempt < (role_cfg.max_retries + 1):
+        (parent_dir / ".orchestrator_attempt").write_text(str(attempt + 1))
+        tail = _read_log_tail(parent_dir, "orchestrator", attempt)
+        (parent_dir / ".previous_failure").write_text(
+            "orchestrator exited without plan.json" + (f"\n{tail}" if tail else "")
+        )
+        return
+    board.move(parent_dir, env.mas / "tasks" / "failed" / parent_task.id)
 
 
 def _role_running(pid_dir: Path, role: str) -> bool:
@@ -289,7 +358,7 @@ def _maybe_dispatch_proposer(env: TickEnv) -> None:
     # go to .mas/tasks/proposed/.
     tdir = env.mas / "tasks" / "doing" / tid
     board.write_task(tdir, task)
-    _dispatch_role(env, task, tdir, env.repo, role="proposer")
+    _dispatch_role(env, task, tdir, tdir, role="proposer")
 
 
 # --- Dispatch helper --------------------------------------------------------
