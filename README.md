@@ -59,6 +59,21 @@ concurrency caps.
 
 ## Scheduling
 
+### Daemon (no system cron)
+
+```sh
+mas daemon start              # fork detached process, tick every 300 s
+mas daemon start --interval 60
+mas daemon status
+mas daemon stop
+```
+
+The daemon writes its PID to `.mas/daemon.pid` and logs to
+`.mas/logs/daemon.log`. Only one daemon may run per project; starting a second
+raises an error.
+
+### System cron
+
 ```sh
 mas cron install              # */5 * * * *  cd <project> && mas tick
 mas cron install --interval 10
@@ -122,5 +137,6 @@ injection, id generator.
 ## Scope of v1
 
 Implemented: init, tick, show, promote, retry, logs, cron install/uninstall/
-status. Out of scope (v2): `mas pr`, `mas kill`, `mas prune`, `mas stats`,
-`mas doctor`, launchd, parallel child execution, auto-PR/merge.
+status, daemon start/stop/status. Out of scope (v2): `mas pr`, `mas kill`,
+`mas prune`, `mas stats`, `mas doctor`, launchd, parallel child execution,
+auto-PR/merge.
