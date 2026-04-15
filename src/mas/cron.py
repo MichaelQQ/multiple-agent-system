@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 MARK_BEGIN = "# >>> mas-cron {id} >>>"
@@ -19,10 +21,30 @@ def _set_crontab(content: str) -> None:
     subprocess.run(["crontab", "-"], input=content, text=True, check=True)
 
 
+def _resolve_mas() -> str:
+    # Prefer the currently-running mas entrypoint so cron uses the same
+    # installation the user just invoked (avoids PATH lookups that may
+    # resolve to an unrelated `mas` binary).
+    argv0 = sys.argv[0] if sys.argv else ""
+    if argv0:
+        p = Path(argv0)
+        if p.is_absolute() and p.exists():
+            return str(p)
+        resolved = shutil.which(argv0)
+        if resolved:
+            return resolved
+    return f"{sys.executable} -m mas.cli"
+
+
 def _block(project: Path, interval_minutes: int) -> str:
     ident = _ident(project)
     schedule = f"*/{interval_minutes} * * * *"
-    cmd = f"cd {project} && mas tick >> .mas/logs/tick.log 2>&1"
+    mas_exe = _resolve_mas()
+    cmd = (
+        f"cd {project} && "
+        f"{{ date '+=== %Y-%m-%d %H:%M:%S ==='; {mas_exe} tick; }} "
+        f">> .mas/logs/tick.log 2>&1"
+    )
     return (
         f"{MARK_BEGIN.format(id=ident)}\n"
         f"{schedule} {cmd}\n"

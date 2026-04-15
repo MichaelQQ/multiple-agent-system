@@ -10,7 +10,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from . import board, cron
+from . import board, cron, daemon
 from .config import PROJECT_DIR_NAME, project_dir, project_root
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
@@ -158,6 +158,42 @@ def cron_uninstall() -> None:
 @cron_app.command("status")
 def cron_status() -> None:
     typer.echo(cron.status(project_root()))
+
+
+daemon_app = typer.Typer(
+    no_args_is_help=True,
+    help="Run `mas tick` on an interval via a detached daemon (no system cron).",
+)
+app.add_typer(daemon_app, name="daemon")
+
+
+@daemon_app.command("start")
+def daemon_start(
+    interval: int = typer.Option(300, "--interval", help="Seconds between ticks"),
+) -> None:
+    try:
+        pid = daemon.start(project_root(), interval_seconds=interval)
+    except daemon.DaemonError as e:
+        typer.echo(str(e))
+        raise typer.Exit(1)
+    typer.echo(f"daemon started (pid {pid}, interval {interval}s)")
+
+
+@daemon_app.command("stop")
+def daemon_stop() -> None:
+    stopped = daemon.stop(project_root())
+    typer.echo("daemon stopped" if stopped else "no daemon running")
+
+
+@daemon_app.command("status")
+def daemon_status() -> None:
+    pid, running = daemon.status(project_root())
+    if pid is None:
+        typer.echo("no daemon (no pid file)")
+    elif running:
+        typer.echo(f"daemon running (pid {pid})")
+    else:
+        typer.echo(f"stale pid file (pid {pid} not alive)")
 
 
 if __name__ == "__main__":
