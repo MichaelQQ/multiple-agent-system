@@ -56,10 +56,14 @@ def gather_proposer_signals(
     ideas_path: Path | None = None,
     ci_command: list[str] | None = None,
     git_log_limit: int = 20,
+    mas_root: Path | None = None,
 ) -> dict[str, Any]:
     signals: dict[str, Any] = {}
 
     signals["repo_scan"] = _shallow_tree(project_root, max_depth=2, max_entries=200)
+
+    _mas = mas_root or (project_root / ".mas")
+    signals["already_proposed"] = _list_proposed_tasks(_mas)
 
     log = _run(["git", "-C", str(project_root), "log", f"-{git_log_limit}",
                 "--pretty=format:%h %ad %s", "--date=short"], timeout=15)
@@ -80,6 +84,18 @@ def gather_proposer_signals(
         signals["ci_output"] = ""
 
     return signals
+
+
+def _list_proposed_tasks(mas_root: Path) -> list[str]:
+    proposed: list[str] = []
+    for task_json in sorted((mas_root / "tasks" / "proposed").glob("*/task.json")):
+        try:
+            data = json.loads(task_json.read_text())
+            goal = data.get("goal") or data.get("summary") or task_json.parent.name
+            proposed.append(goal)
+        except Exception:
+            proposed.append(task_json.parent.name)
+    return proposed
 
 
 def _shallow_tree(root: Path, *, max_depth: int, max_entries: int) -> str:

@@ -345,6 +345,7 @@ def _maybe_dispatch_proposer(env: TickEnv) -> None:
         env.repo,
         ideas_path=ideas,
         ci_command=ci_cmd,
+        mas_root=env.mas,
     )
     goal = "Propose a new task for the board"
     tid = new_task_id(goal)
