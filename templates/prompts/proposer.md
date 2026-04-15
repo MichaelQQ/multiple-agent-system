@@ -18,7 +18,7 @@ $constraints_json
 
 ## Output
 
-Write a JSON file at `./result.json` with:
+Write a JSON file at `$task_dir/result.json` with:
 
 - `task_id`: "$task_id"
 - `status`: "success"
@@ -28,7 +28,7 @@ Write a JSON file at `./result.json` with:
 - `duration_s`: <seconds you spent>
 
 Additionally, write the proposal itself as `task.json` (a Task) into
-`.mas/tasks/proposed/<new-id>/` where `<new-id>` follows the format
+`$mas_dir/tasks/proposed/<new-id>/` where `<new-id>` follows the format
 `YYYYMMDD-slug-xxxx`. Keep proposals narrow, concrete, and testable.
 
 $result_schema

@@ -67,7 +67,10 @@ def write_task(dir_: Path, task: Task) -> Path:
 
 def read_task(dir_: Path) -> Task:
     p = dir_ / "task.json"
-    return Task.model_validate_json(p.read_text())
+    data = json.loads(p.read_text())
+    known = Task.model_fields.keys()
+    data = {k: v for k, v in data.items() if k in known}
+    return Task.model_validate(data)
 
 
 def read_result(dir_: Path):
@@ -101,14 +104,23 @@ def count_active_pids(mas_dir: Path, provider: str | None = None) -> int:
 
 
 def _pid_alive(pid: int) -> bool:
-    import os
     import errno
+    import os
+    import subprocess
 
     try:
         os.kill(pid, 0)
     except OSError as e:
         return e.errno == errno.EPERM
-    return True
+    try:
+        r = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "state="],
+            capture_output=True, text=True, timeout=2,
+        )
+        state = r.stdout.strip()
+        return bool(state) and state != "Z"
+    except Exception:
+        return True
 
 
 def write_pid(pid_dir: Path, role: str, provider: str, pid: int) -> Path:

@@ -76,5 +76,16 @@ class Adapter(abc.ABC):
             log_path=log_path,
         )
 
+    # Strip VS Code plumbing vars that are irrelevant (or harmful) to a detached
+    # subprocess.  CLAUDE_CODE_* and CLAUDECODE are intentionally kept — they carry
+    # the SSE port used for auth when running inside VS Code; stripping them causes
+    # "Not logged in" for users whose credentials live in the IDE session rather than
+    # the system keychain.
+    _STRIP_ENV_PREFIXES = ("VSCODE_", "GIT_ASKPASS")
+
     def _env(self) -> dict[str, str]:
-        return dict(os.environ)
+        env = dict(os.environ)
+        for key in list(env):
+            if any(key == p or key.startswith(p) for p in self._STRIP_ENV_PREFIXES):
+                del env[key]
+        return env

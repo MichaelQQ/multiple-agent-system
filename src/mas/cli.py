@@ -100,7 +100,7 @@ def promote(task_id: str) -> None:
 
 @app.command()
 def retry(task_id: str) -> None:
-    """Push a failed task back into doing/."""
+    """Push a failed task back into doing/ with state reset."""
     mas = project_dir()
     src = mas / "tasks" / "failed" / task_id
     if not src.exists():
@@ -108,7 +108,32 @@ def retry(task_id: str) -> None:
         raise typer.Exit(1)
     dst = mas / "tasks" / "doing" / task_id
     board.move(src, dst)
+    _reset_task_state(dst)
     typer.echo(f"retrying {task_id}")
+
+
+def _reset_task_state(task_dir: Path) -> None:
+    """Clear execution state so the tick loop re-runs from scratch."""
+    # Remove top-level result (marks the task as done/failed)
+    (task_dir / "result.json").unlink(missing_ok=True)
+    # Reset orchestrator attempt counter and its previous_failure marker
+    (task_dir / ".orchestrator_attempt").unlink(missing_ok=True)
+    (task_dir / ".previous_failure").unlink(missing_ok=True)
+    # Remove plan so orchestrator re-runs from scratch
+    (task_dir / "plan.json").unlink(missing_ok=True)
+    # Reset each subtask: remove results, attempt counter, and failure markers
+    subtasks_root = task_dir / "subtasks"
+    if subtasks_root.exists():
+        for child_dir in subtasks_root.iterdir():
+            if not child_dir.is_dir():
+                continue
+            (child_dir / "result.json").unlink(missing_ok=True)
+            (child_dir / ".previous_failure").unlink(missing_ok=True)
+            for f in child_dir.glob("result.failed-*.json"):
+                f.unlink()
+            attempt_file = child_dir / ".attempt"
+            if attempt_file.exists():
+                attempt_file.write_text("1")
 
 
 @app.command()

@@ -102,6 +102,11 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
         if result is not None:
             col = "done" if result.status == "success" else "failed"
             board.move(parent_dir, env.mas / "tasks" / col / parent_task.id)
+            return
+        # Never dispatched (no log file, no result) — dispatch now.
+        log_path = parent_dir / "logs" / f"proposer-{parent_task.attempt}.log"
+        if not log_path.exists():
+            _dispatch_role(env, parent_task, parent_dir, parent_dir, role="proposer")
         return
 
     plan_path = parent_dir / "plan.json"
@@ -338,9 +343,13 @@ def _maybe_dispatch_proposer(env: TickEnv) -> None:
     if len(proposed) >= env.cfg.max_proposed:
         return
 
-    # Already a proposer running?
-    for p in env.mas.glob("tasks/doing/*/pids/proposer.*.pid"):
-        if _pid_alive(int(p.read_text().strip())):
+    # Already a proposer task in doing/ (running or waiting to be dispatched)?
+    for tdir in board.list_column(env.mas, "doing"):
+        try:
+            t = board.read_task(tdir)
+        except Exception:
+            continue
+        if t.role == "proposer":
             return
 
     # Check provider concurrency cap
