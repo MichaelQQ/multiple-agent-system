@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -237,7 +238,16 @@ def _pid_alive(pid: int) -> bool:
         os.kill(pid, 0)
     except OSError as e:
         return e.errno == errno.EPERM
-    return True
+    # os.kill(pid, 0) succeeds for zombie processes too; check actual state.
+    try:
+        r = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "state="],
+            capture_output=True, text=True, timeout=2,
+        )
+        state = r.stdout.strip()
+        return bool(state) and state != "Z"
+    except Exception:
+        return True
 
 
 def _next_ready_child(plan: Plan, subtasks_root: Path):
