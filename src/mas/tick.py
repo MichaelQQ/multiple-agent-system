@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from . import board, worktree
+from . import board, transitions, worktree
 from .adapters import get_adapter
 from .config import load_config, project_root, project_dir
 from .ids import task_id as new_task_id
@@ -287,6 +287,12 @@ def _all_children_passed(plan: Plan, subtasks_root: Path) -> bool:
 
 
 def _handle_child_result(env, parent_dir, parent_task, plan, spec, result):
+    child_dir = parent_dir / "subtasks" / spec.id
+    txns = transitions.read_transitions(child_dir, limit=3)
+    if txns:
+        txn_str = " | ".join(f"{x['from']}→{x['to']}({x['reason']})" for x in txns)
+        result.feedback = (result.feedback or "") + (f"\n[transition history: {txn_str}]" if result.feedback else f"[transition history: {txn_str}]")
+
     # Success path: mark and move on (by next tick).
     if result.status == "success" and (spec.role != "evaluator" or result.verdict == "pass"):
         return

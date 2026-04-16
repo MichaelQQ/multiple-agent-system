@@ -152,3 +152,67 @@ def test_existing_task_without_log(tmp_path):
     result = read_transitions(tmp_path)
     assert len(result) == 1
     assert result[0]["reason"] == "max_retries_exceeded"
+
+
+# --- transition summary in result feedback -----------------------------------
+
+
+def test_transition_summary_appended_to_feedback(tmp_path):
+    """Transition history is appended to result.feedback when present."""
+    log_transition(tmp_path, "none", "doing", "created")
+    log_transition(tmp_path, "doing", "doing", "retry")
+    log_transition(tmp_path, "doing", "done", "role_success")
+
+    txns = read_transitions(tmp_path, limit=3)
+    assert txns
+
+    existing_feedback = "Test output from role"
+    txn_str = " | ".join(f"{x['from']}→{x['to']}({x['reason']})" for x in txns)
+    expected = existing_feedback + f"\n[transition history: {txn_str}]"
+
+    combined = (existing_feedback or "") + (
+        f"\n[transition history: {txn_str}]" if existing_feedback else f"[transition history: {txn_str}]"
+    )
+    assert combined == expected
+
+
+def test_transition_summary_without_existing_feedback(tmp_path):
+    """Transition history is set when result has no existing feedback."""
+    log_transition(tmp_path, "none", "proposed", "created")
+    log_transition(tmp_path, "proposed", "doing", "manual_promote")
+
+    txns = read_transitions(tmp_path, limit=3)
+    txn_str = " | ".join(f"{x['from']}→{x['to']}({x['reason']})" for x in txns)
+
+    feedback = ""
+    combined = (feedback or "") + f"[transition history: {txn_str}]"
+    assert "[transition history:" in combined
+    assert "none→proposed(created)" in combined
+    assert "proposed→doing(manual_promote)" in combined
+
+
+def test_transition_summary_empty_when_no_transitions(tmp_path):
+    """No transition history added when task has no transitions.log."""
+    txns = read_transitions(tmp_path)
+    assert txns == []
+
+    txn_str = " | ".join(f"{x['from']}→{x['to']}({x['reason']})" for x in txns)
+    assert txn_str == ""
+
+
+def test_retry_logs_manual_retry_reason(tmp_path):
+    """Retry command logs 'manual_retry' as the transition reason."""
+    from mas import board
+    from mas.schemas import Task
+
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    src = mas / "tasks" / "failed" / "task-retry"
+    task = Task(id="task-retry", role="orchestrator", goal="test")
+    board.write_task(src, task)
+
+    dst = mas / "tasks" / "doing" / "task-retry"
+    board.move(src, dst, reason="manual_retry")
+
+    result = read_transitions(dst)
+    assert result[-1]["reason"] == "manual_retry"
