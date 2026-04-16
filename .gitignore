@@ -7,3 +7,4 @@ build/
 .pytest_cache/
 .mas/
 .claude/
+.coverage
