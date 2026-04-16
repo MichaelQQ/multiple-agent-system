@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 from pathlib import Path
 from string import Template
 from typing import Any
 
 from .schemas import Plan, ProposerSignals, Task
+
+log = logging.getLogger("mas.roles")
 
 
 _RESULT_SCHEMA_HINT = """
@@ -44,6 +47,7 @@ def render_prompt(template_path: Path, task: Task, **extra: Any) -> str:
         "result_schema": _RESULT_SCHEMA_HINT,
     }
     vars_.update({k: str(v) for k, v in extra.items()})
+    log.debug("rendering prompt", extra={"role": task.role, "task_id": task.id})
     return tmpl.safe_substitute(vars_)
 
 

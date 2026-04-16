@@ -14,6 +14,12 @@ PID_FILENAME = "daemon.pid"
 LOG_FILENAME = "logs/daemon.log"
 
 
+def _log_tick_event(msg: str, **kwargs) -> None:
+    extra = {"component": "daemon"}
+    extra.update(kwargs)
+    log.info(msg, extra=extra)
+
+
 class DaemonError(RuntimeError):
     pass
 
@@ -118,12 +124,14 @@ def _run_loop(project: Path, interval_seconds: int, stop_flag: dict) -> None:
         print(f"=== {stamp} tick start ===", flush=True)
         try:
             run_tick(start=project)
+            elapsed = time.time() - started
+            _log_tick_event("tick completed", duration_s=elapsed)
         except Exception:
+            elapsed = time.time() - started
+            _log_tick_event("tick failed", duration_s=elapsed)
             log.exception("tick failed")
-        elapsed = time.time() - started
         print(f"=== tick done in {elapsed:.2f}s ===", flush=True)
 
-        # Sleep in short slices so SIGTERM is responsive.
         remaining = interval_seconds
         while remaining > 0 and not stop_flag["stop"]:
             time.sleep(min(1, remaining))

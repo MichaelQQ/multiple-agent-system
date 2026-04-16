@@ -14,6 +14,7 @@ from . import board, transitions, worktree
 from .adapters import get_adapter
 from .config import load_config, project_root, project_dir
 from .ids import task_id as new_task_id
+from .logging import get_task_logger
 from .roles import gather_proposer_signals, parse_plan, render_prompt
 from .schemas import BaseModel, ConfigDict, MasConfig, Plan, Result, Role, Task
 
@@ -84,7 +85,8 @@ def _advance_doing(env: TickEnv) -> None:
         try:
             _advance_one(env, task_dir_)
         except Exception:
-            log.exception("advance failed for %s", task_dir_.name)
+            task_id = task_dir_.name
+            get_task_logger(log, task_id=task_id, component="tick").exception("advance failed")
 
 
 def _advance_one(env: TickEnv, parent_dir: Path) -> None:
@@ -366,8 +368,9 @@ def _materialize_proposal(env: TickEnv, result: Result) -> None:
     from handoff."""
     handoff = result.handoff or {}
     goal = handoff.get("goal") or result.summary
+    tlog = get_task_logger(log, task_id=result.task_id, component="proposer")
     if not goal:
-        log.warning("proposer %s: no goal in handoff, skipping materialization", result.task_id)
+        tlog.warning("no goal in handoff, skipping materialization")
         return
     if len(board.list_column(env.mas, "proposed")) >= env.cfg.max_proposed:
         return
@@ -385,12 +388,12 @@ def _materialize_proposal(env: TickEnv, result: Result) -> None:
         tid = new_task_id(goal, salt=result.task_id)
         target = env.mas / "tasks" / "proposed" / tid
         if target.exists():
-            log.warning("proposer %s: proposed/%s already exists, skipping", result.task_id, tid)
+            tlog.warning("proposed/%s already exists, skipping", tid)
             return
 
     task = Task(id=tid, role="orchestrator", goal=goal, inputs=inputs)
     board.write_task(target, task)
-    log.info("proposer %s: materialized proposal %s", result.task_id, tid)
+    tlog.info("materialized proposal %s", tid)
 
 
 def _materialize_plan(parent_dir: Path, result: Result) -> bool:
@@ -400,13 +403,14 @@ def _materialize_plan(parent_dir: Path, result: Result) -> bool:
     """
     handoff = dict(result.handoff or {})
     handoff.setdefault("parent_id", result.task_id)
+    tlog = get_task_logger(log, task_id=result.task_id, component="orchestrator")
     try:
         plan = Plan.model_validate(handoff)
     except Exception as e:
-        log.warning("orchestrator %s: handoff is not a valid Plan (%s)", result.task_id, e)
+        tlog.warning("handoff is not a valid Plan (%s)", e)
         return False
     (parent_dir / "plan.json").write_text(plan.model_dump_json(indent=2))
-    log.info("orchestrator %s: materialized plan.json from handoff", result.task_id)
+    tlog.info("materialized plan.json from handoff")
     return True
 
 

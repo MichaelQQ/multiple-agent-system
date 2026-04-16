@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 from pathlib import Path
 from typing import Literal
 
 from .schemas import BoardSummary, Task
+
+log = logging.getLogger("mas.board")
 
 Column = Literal["proposed", "doing", "done", "failed"]
 COLUMNS: tuple[Column, ...] = ("proposed", "doing", "done", "failed")
@@ -51,15 +54,15 @@ def list_column(mas_dir: Path, column: Column) -> list[Path]:
 
 def move(src: Path, dst: Path, *, reason: str = "") -> Path:
     from . import transitions as _tr
-    # Infer states from path components before moving.
-    from_state = src.parent.name  # e.g. "proposed", "doing", "done", "failed"
+    from_state = src.parent.name
     to_state = dst.parent.name
+    task_id = src.name
     _tr.log_transition(src, from_state, to_state, reason)
     dst.parent.mkdir(parents=True, exist_ok=True)
     if dst.exists():
         raise FileExistsError(f"destination exists: {dst}")
-    # os.rename is atomic within a filesystem; shutil.move falls back otherwise.
     shutil.move(str(src), str(dst))
+    log.info("task moved", extra={"task_id": task_id, "from_column": from_state, "to_column": to_state, "reason": reason})
     return dst
 
 

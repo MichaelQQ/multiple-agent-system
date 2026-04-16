@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from .schemas import MasConfig
+
+log = logging.getLogger("mas.config")
 
 
 USER_CONFIG_DIR = Path.home() / ".config" / "mas"
@@ -54,4 +57,5 @@ def load_config(project: Path | None = None) -> MasConfig:
     roles = _deep_merge(user_roles, proj_roles)
     if roles:
         merged["roles"] = roles.get("roles", roles)
+    log.debug("config loaded", extra={"path": str(proj / "config.yaml")})
     return MasConfig.model_validate(merged)

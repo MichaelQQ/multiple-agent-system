@@ -124,7 +124,7 @@ def test_advance_doing_catches_exception_per_task(tmp_path: Path, caplog):
     with patch("mas.tick._advance_one", side_effect=RuntimeError("die")):
         _advance_doing(env)
 
-    assert "advance failed for" in caplog.text
+    assert "advance failed" in caplog.text
 
 
 # ---------------------------------------------------------------------------
