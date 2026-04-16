@@ -5,6 +5,7 @@ from .claude_code import ClaudeCodeAdapter
 from .codex import CodexAdapter
 from .gemini_cli import GeminiCliAdapter
 from .ollama import OllamaAdapter
+from .opencode import OpenCodeAdapter
 from .mock import MockAdapter
 
 REGISTRY: dict[str, type[Adapter]] = {
@@ -12,6 +13,7 @@ REGISTRY: dict[str, type[Adapter]] = {
     "codex": CodexAdapter,
     "gemini": GeminiCliAdapter,
     "ollama": OllamaAdapter,
+    "opencode": OpenCodeAdapter,
     "mock": MockAdapter,
 }
 
