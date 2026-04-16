@@ -41,7 +41,7 @@ class Result(BaseModel):
     feedback: str | None = None
     tokens_in: int | None = None
     tokens_out: int | None = None
-    duration_s: float = 0.0
+    duration_s: float | None = None
     cost_usd: float | None = None
 
 
