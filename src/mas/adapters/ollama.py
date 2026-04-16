@@ -31,7 +31,7 @@ class OllamaAdapter(Adapter):
 
     def build_command(self, prompt: str, task_dir: Path, cwd: Path) -> list[str]:
         cli = self.provider_cfg.cli or "ollama"
-        model = self.role_cfg.model or "llama3.2"
+        model = self.role_cfg.model or "gemma4:e4b"
         args: list[str] = [cli, "run", model]
         args += list(self.provider_cfg.extra_args)
         return args
@@ -51,7 +51,7 @@ class OllamaAdapter(Adapter):
         stdin_text: str | None = None,
     ) -> DispatchHandle:
         cli = self.provider_cfg.cli or "ollama"
-        model = self.role_cfg.model or "llama3.2"
+        model = self.role_cfg.model or "gemma4:e4b"
         extra = list(self.provider_cfg.extra_args)
 
         base_prompt = stdin_text if stdin_text is not None else prompt
