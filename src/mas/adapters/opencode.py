@@ -14,7 +14,9 @@ class OpenCodeAdapter(Adapter):
         args: list[str] = [cli, "run", prompt]
         if self.role_cfg.model:
             args += ["-m", self.role_cfg.model]
-        if self.role_cfg.permission_mode == "bypassPermissions":
+        if self.role_cfg.permission_mode == "bypassPermissions" or (
+            task_dir != cwd and not task_dir.is_relative_to(cwd)
+        ):
             args.append("--dangerously-skip-permissions")
         args += list(self.provider_cfg.extra_args)
         return args

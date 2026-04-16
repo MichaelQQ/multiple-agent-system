@@ -18,5 +18,8 @@ class ClaudeCodeAdapter(Adapter):
             args += ["--permission-mode", self.role_cfg.permission_mode]
         if self.role_cfg.allowed_tools:
             args += ["--allowedTools", ",".join(self.role_cfg.allowed_tools)]
+        # Grant write access to the task directory (lives outside the worktree).
+        if task_dir != cwd and not task_dir.is_relative_to(cwd):
+            args += ["--add-dir", str(task_dir)]
         args += list(self.provider_cfg.extra_args)
         return args

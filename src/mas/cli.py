@@ -10,7 +10,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from . import board, cron, daemon
+from . import board, cron, daemon, transitions
 from .config import PROJECT_DIR_NAME, project_dir, project_root
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
@@ -74,14 +74,21 @@ def tick() -> None:
 def show() -> None:
     """Print the current board."""
     mas = project_dir()
-    table = Table("column", "id", "role", "goal")
+    table = Table("column", "id", "role", "goal", "recent transitions")
     for col in board.COLUMNS:
         for d in board.list_column(mas, col):
             try:
                 t = board.read_task(d)
-                table.add_row(col, t.id, t.role, t.goal[:60])
+                goal = t.goal[:60]
             except Exception:
-                table.add_row(col, d.name, "?", "?")
+                t = None
+                goal = "?"
+            txns = transitions.read_transitions(d, limit=5)
+            txn_str = "\n".join(
+                f"{x['timestamp'][11:19]} {x['from']}→{x['to']} ({x['reason']})"
+                for x in txns
+            ) if txns else ""
+            table.add_row(col, d.name, t.role if t else "?", goal, txn_str)
     console.print(table)
 
 
@@ -107,7 +114,7 @@ def retry(task_id: str) -> None:
         typer.echo(f"not found: {src}")
         raise typer.Exit(1)
     dst = mas / "tasks" / "doing" / task_id
-    board.move(src, dst)
+    board.move(src, dst, reason="manual_retry")
     _reset_task_state(dst)
     typer.echo(f"retrying {task_id}")
 
@@ -160,6 +167,43 @@ def logs(
         subprocess.run(["tail", "-f", str(latest)])
     else:
         sys.stdout.write(latest.read_text())
+
+
+@app.command()
+def tail(
+    task_id: str,
+    lines: int = typer.Option(10, "-n", "--lines", help="Number of historical lines to show"),
+    follow: bool = typer.Option(False, "-f", "--follow", help="Keep stream open until EOF"),
+) -> None:
+    """Stream task logs (last N lines, optionally follow)."""
+    import signal
+
+    mas = project_dir()
+    located = board.find_task(mas, task_id)
+    if located is None:
+        typer.echo(f"not found: {task_id}")
+        raise typer.Exit(1)
+    _, tdir = located
+    log_dir = tdir / "logs"
+    if not log_dir.exists():
+        typer.echo(f"no logs for {task_id}")
+        raise typer.Exit(0)
+    latest = max(log_dir.glob("*.log"), key=lambda p: p.stat().st_mtime, default=None)
+    if latest is None:
+        typer.echo(f"no logs for {task_id}")
+        raise typer.Exit(0)
+
+    cmd = ["tail", f"-n{lines}"]
+    if follow:
+        cmd.append("-f")
+    cmd.append(str(latest))
+
+    proc = subprocess.Popen(cmd)
+    try:
+        proc.wait()
+    except KeyboardInterrupt:
+        proc.send_signal(signal.SIGTERM)
+        proc.wait()
 
 
 cron_app = typer.Typer(no_args_is_help=True, help="Cron schedule for `mas tick`.")
