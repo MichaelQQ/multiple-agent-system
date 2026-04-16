@@ -121,6 +121,11 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
         pid_dir = parent_dir / "pids"
         if _role_running(pid_dir, "orchestrator"):
             return
+        # Non-agentic orchestrator: materialize plan.json from result.handoff.
+        result = board.read_result(parent_dir)
+        if result is not None and result.status == "success" and result.handoff:
+            if _materialize_plan(parent_dir, result):
+                return  # plan.json written; next tick will parse it
         orch_attempt = _read_attempt(parent_dir / ".orchestrator_attempt")
         if _worker_orphaned(parent_dir, "orchestrator", orch_attempt):
             _retry_or_fail_orchestrator(env, parent_dir, parent_task, orch_attempt)
@@ -373,6 +378,23 @@ def _materialize_proposal(env: TickEnv, result: Result) -> None:
     task = Task(id=tid, role="orchestrator", goal=goal, inputs=inputs)
     board.write_task(target, task)
     log.info("proposer %s: materialized proposal %s", result.task_id, tid)
+
+
+def _materialize_plan(parent_dir: Path, result: Result) -> bool:
+    """Write plan.json from result.handoff for non-agentic orchestrators.
+
+    Returns True if plan.json was written successfully.
+    """
+    handoff = dict(result.handoff or {})
+    handoff.setdefault("parent_id", result.task_id)
+    try:
+        plan = Plan.model_validate(handoff)
+    except Exception as e:
+        log.warning("orchestrator %s: handoff is not a valid Plan (%s)", result.task_id, e)
+        return False
+    (parent_dir / "plan.json").write_text(plan.model_dump_json(indent=2))
+    log.info("orchestrator %s: materialized plan.json from handoff", result.task_id)
+    return True
 
 
 def _maybe_dispatch_proposer(env: TickEnv) -> None:
