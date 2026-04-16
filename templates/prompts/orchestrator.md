@@ -28,7 +28,7 @@ Write `$task_dir/plan.json` as:
 }
 ```
 
-Then write `$task_dir/result.json` as a Result with `status: "success"` and
+Then write `$task_dir/result.json` (do **not** write it inside the worktree) as a Result with `status: "success"` and
 `summary: "plan emitted"`.
 
 $result_schema

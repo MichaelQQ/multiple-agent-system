@@ -15,6 +15,8 @@ $previous_failure
 
 ## Output
 
+When done, write `$task_dir/result.json` (do **not** write it inside the worktree):
+
 - `status`: "success" if tests pass; "failure" otherwise
 - `summary`: test command(s) run and outcome
 - `artifacts`: list of test files created or modified

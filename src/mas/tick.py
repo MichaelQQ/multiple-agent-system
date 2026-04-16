@@ -305,6 +305,10 @@ def _handle_child_result(env, parent_dir, parent_task, plan, spec, result):
         attempts_path.write_text(str(attempt + 1))
         child_dir = parent_dir / "subtasks" / spec.id
         (child_dir / "result.json").rename(child_dir / f"result.failed-{attempt}.json")
+        # Remove any stale result.json the worker may have written inside the worktree.
+        stale = parent_dir / "worktree" / "result.json"
+        if stale.exists():
+            stale.unlink()
         # Write a marker so the next dispatch picks it up as previous_failure.
         (child_dir / ".previous_failure").write_text(result.summary + ("\n" + (result.feedback or "")))
         return

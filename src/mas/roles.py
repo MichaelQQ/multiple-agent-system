@@ -10,8 +10,8 @@ from .schemas import Plan, Task
 
 
 _RESULT_SCHEMA_HINT = """
-Your last action MUST be writing a valid `result.json` at the root of the
-current working directory matching this schema (pydantic):
+Your last action MUST be writing a valid `result.json` to the path in the
+`MAS_TASK_DIR` environment variable (not inside the worktree) matching this schema (pydantic):
 
 {
   "task_id": str,
