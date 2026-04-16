@@ -63,6 +63,40 @@ def init(
 
 
 @app.command()
+def upgrade(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would change without writing"),
+) -> None:
+    """Update .mas/ template files from the installed package, preserving tasks and logs."""
+    mas = project_dir()
+    tpl = _templates_dir()
+
+    board.ensure_layout(mas)
+
+    targets: list[tuple[Path, Path]] = []
+    for name in ("config.yaml", "roles.yaml"):
+        src = tpl / name
+        if src.exists():
+            targets.append((src, mas / name))
+    prompts_src = tpl / "prompts"
+    if prompts_src.exists():
+        for p in prompts_src.iterdir():
+            targets.append((p, mas / "prompts" / p.name))
+
+    for src, dst in targets:
+        if dry_run:
+            status = "new" if not dst.exists() else "update"
+            typer.echo(f"  {status}: {dst.relative_to(mas.parent)}")
+        else:
+            shutil.copy(src, dst)
+            typer.echo(f"  wrote {dst.relative_to(mas.parent)}")
+
+    if dry_run:
+        typer.echo("(dry-run, nothing written)")
+    else:
+        typer.echo("upgrade complete")
+
+
+@app.command()
 def tick() -> None:
     """Run a single tick of the orchestrator."""
     from .tick import run_tick
