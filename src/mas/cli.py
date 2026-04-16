@@ -10,7 +10,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from . import board, cron, daemon, transitions
+from . import board, cron, daemon, transitions, worktree
 from .config import PROJECT_DIR_NAME, project_dir, project_root
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
@@ -151,6 +151,31 @@ def retry(task_id: str) -> None:
     board.move(src, dst, reason="manual_retry")
     _reset_task_state(dst)
     typer.echo(f"retrying {task_id}")
+
+
+@app.command()
+def prune() -> None:
+    """Remove worktree directories from done/ and failed/ tasks."""
+    mas = project_dir()
+    root = project_root()
+    done_tasks = board.list_column(mas, "done")
+    failed_tasks = board.list_column(mas, "failed")
+    all_tasks = done_tasks + failed_tasks
+    pruned_count = 0
+    total_count = len(all_tasks)
+
+    for task_dir in all_tasks:
+        worktree_dir = task_dir / "worktree"
+        if not worktree_dir.exists():
+            continue
+        try:
+            worktree.prune(root, worktree_dir, keep_branch=True)
+            console.print(f"[green]✔[/green] Pruned {task_dir.name}/worktree")
+            pruned_count += 1
+        except Exception as e:
+            console.print(f"[yellow]⚠[/yellow] Failed to prune {task_dir.name}/worktree: {e}")
+
+    console.print(f"Pruned {pruned_count} worktrees from {total_count} completed tasks")
 
 
 def _reset_task_state(task_dir: Path) -> None:
