@@ -7,7 +7,6 @@ import logging
 import os
 import shutil
 import subprocess
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
@@ -16,7 +15,7 @@ from .adapters import get_adapter
 from .config import load_config, project_root, project_dir
 from .ids import task_id as new_task_id
 from .roles import gather_proposer_signals, parse_plan, render_prompt
-from .schemas import MasConfig, Plan, Result, Role, Task
+from .schemas import BaseModel, ConfigDict, MasConfig, Plan, Result, Role, Task
 
 log = logging.getLogger("mas.tick")
 
@@ -25,8 +24,9 @@ class LockBusy(RuntimeError):
     pass
 
 
-@dataclass
-class TickEnv:
+class TickEnv(BaseModel):
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
+
     repo: Path
     mas: Path
     cfg: MasConfig
@@ -290,7 +290,7 @@ def _handle_child_result(env, parent_dir, parent_task, plan, spec, result):
     child_dir = parent_dir / "subtasks" / spec.id
     txns = transitions.read_transitions(child_dir, limit=3)
     if txns:
-        txn_str = " | ".join(f"{x['from']}→{x['to']}({x['reason']})" for x in txns)
+        txn_str = " | ".join(f"{txn.from_state}→{txn.to_state}({txn.reason})" for txn in txns)
         result.feedback = (result.feedback or "") + (f"\n[transition history: {txn_str}]" if result.feedback else f"[transition history: {txn_str}]")
 
     # Success path: mark and move on (by next tick).
@@ -444,7 +444,7 @@ def _maybe_dispatch_proposer(env: TickEnv) -> None:
         id=tid,
         role="proposer",
         goal=goal,
-        inputs={"signals": signals},
+        inputs={"signals": signals.model_dump()},
     )
     # Proposer runs in a transient workspace inside doing/; proposals it emits
     # go to .mas/tasks/proposed/.
