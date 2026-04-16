@@ -342,6 +342,8 @@ def _append_revision_cycle(parent_dir: Path, plan: Plan, parent_task, feedback: 
 
 def _finalize_parent(env: TickEnv, parent_dir: Path, parent_task) -> None:
     wt = parent_dir / "worktree"
+    if wt.exists():
+        worktree.commit_changes(wt, parent_task.goal)
     worktree.prune(env.repo, wt, keep_branch=True)
     dst = env.mas / "tasks" / "done" / parent_task.id
     board.move(parent_dir, dst, reason="role_success")

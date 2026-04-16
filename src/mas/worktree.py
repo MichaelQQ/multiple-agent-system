@@ -49,6 +49,19 @@ def create(repo: Path, task_id: str, worktree_path: Path) -> Path:
     return worktree_path
 
 
+def commit_changes(worktree_path: Path, message: str) -> bool:
+    """Stage all changes in the worktree and commit. Returns True if a commit was made."""
+    r = subprocess.run(
+        ["git", "-C", str(worktree_path), "status", "--porcelain"],
+        capture_output=True, text=True, check=False,
+    )
+    if not r.stdout.strip():
+        return False
+    subprocess.run(["git", "-C", str(worktree_path), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(worktree_path), "commit", "-m", message], check=True)
+    return True
+
+
 def prune(repo: Path, worktree_path: Path, *, keep_branch: bool = True) -> None:
     if worktree_path.exists():
         _git(repo, "worktree", "remove", "--force", str(worktree_path), check=False)
