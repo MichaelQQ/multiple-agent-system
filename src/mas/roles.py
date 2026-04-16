@@ -6,7 +6,7 @@ from pathlib import Path
 from string import Template
 from typing import Any
 
-from .schemas import Plan, Task
+from .schemas import Plan, ProposerSignals, Task
 
 
 _RESULT_SCHEMA_HINT = """
@@ -57,7 +57,7 @@ def gather_proposer_signals(
     ci_command: list[str] | None = None,
     git_log_limit: int = 20,
     mas_root: Path | None = None,
-) -> dict[str, Any]:
+) -> ProposerSignals:
     signals: dict[str, Any] = {}
 
     signals["repo_scan"] = _shallow_tree(project_root, max_depth=2, max_entries=200)
@@ -83,7 +83,7 @@ def gather_proposer_signals(
     else:
         signals["ci_output"] = ""
 
-    return signals
+    return ProposerSignals.model_validate(signals)
 
 
 def _list_proposed_tasks(mas_root: Path) -> list[str]:

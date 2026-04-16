@@ -46,9 +46,9 @@ def test_read_transitions(tmp_path):
     log_transition(tmp_path, "proposed", "doing", "promoted")
     result = read_transitions(tmp_path)
     assert len(result) == 2
-    assert result[0]["from"] == "none"
-    assert result[1]["to"] == "doing"
-    assert result[1]["reason"] == "promoted"
+    assert result[0].from_state == "none"
+    assert result[1].to_state == "doing"
+    assert result[1].reason == "promoted"
 
 
 def test_read_transitions_limit(tmp_path):
@@ -56,7 +56,7 @@ def test_read_transitions_limit(tmp_path):
         log_transition(tmp_path, str(i), str(i + 1), f"step{i}")
     result = read_transitions(tmp_path, limit=3)
     assert len(result) == 3
-    assert result[0]["reason"] == "step2"
+    assert result[0].reason == "step2"
 
 
 def test_read_transitions_empty(tmp_path):
@@ -70,9 +70,9 @@ def test_ensure_initial_log(tmp_path):
     ensure_initial_log(tmp_path, "proposed")
     result = read_transitions(tmp_path)
     assert len(result) == 1
-    assert result[0]["from"] == "none"
-    assert result[0]["to"] == "proposed"
-    assert result[0]["reason"] == "created"
+    assert result[0].from_state == "none"
+    assert result[0].to_state == "proposed"
+    assert result[0].reason == "created"
 
 
 def test_ensure_initial_log_idempotent(tmp_path):
@@ -98,7 +98,7 @@ def test_board_move_logs_transition(tmp_path):
     board.move(src, dst)
 
     result = read_transitions(dst)
-    assert any(r["from"] == "proposed" and r["to"] == "doing" for r in result)
+    assert any(r.from_state == "proposed" and r.to_state == "doing" for r in result)
 
 
 def test_board_move_with_reason(tmp_path):
@@ -115,7 +115,7 @@ def test_board_move_with_reason(tmp_path):
     board.move(src, dst, reason="manual_promote")
 
     result = read_transitions(dst)
-    assert result[-1]["reason"] == "manual_promote"
+    assert result[-1].reason == "manual_promote"
 
 
 # --- concurrent writes --------------------------------------------------------
@@ -151,7 +151,7 @@ def test_existing_task_without_log(tmp_path):
     log_transition(tmp_path, "doing", "failed", "max_retries_exceeded")
     result = read_transitions(tmp_path)
     assert len(result) == 1
-    assert result[0]["reason"] == "max_retries_exceeded"
+    assert result[0].reason == "max_retries_exceeded"
 
 
 # --- transition summary in result feedback -----------------------------------
@@ -167,7 +167,7 @@ def test_transition_summary_appended_to_feedback(tmp_path):
     assert txns
 
     existing_feedback = "Test output from role"
-    txn_str = " | ".join(f"{x['from']}→{x['to']}({x['reason']})" for x in txns)
+    txn_str = " | ".join(f"{x.from_state}→{x.to_state}({x.reason})" for x in txns)
     expected = existing_feedback + f"\n[transition history: {txn_str}]"
 
     combined = (existing_feedback or "") + (
@@ -182,7 +182,7 @@ def test_transition_summary_without_existing_feedback(tmp_path):
     log_transition(tmp_path, "proposed", "doing", "manual_promote")
 
     txns = read_transitions(tmp_path, limit=3)
-    txn_str = " | ".join(f"{x['from']}→{x['to']}({x['reason']})" for x in txns)
+    txn_str = " | ".join(f"{x.from_state}→{x.to_state}({x.reason})" for x in txns)
 
     feedback = ""
     combined = (feedback or "") + f"[transition history: {txn_str}]"
@@ -196,7 +196,7 @@ def test_transition_summary_empty_when_no_transitions(tmp_path):
     txns = read_transitions(tmp_path)
     assert txns == []
 
-    txn_str = " | ".join(f"{x['from']}→{x['to']}({x['reason']})" for x in txns)
+    txn_str = " | ".join(f"{x.from_state}→{x.to_state}({x.reason})" for x in txns)
     assert txn_str == ""
 
 
@@ -215,4 +215,4 @@ def test_retry_logs_manual_retry_reason(tmp_path):
     board.move(src, dst, reason="manual_retry")
 
     result = read_transitions(dst)
-    assert result[-1]["reason"] == "manual_retry"
+    assert result[-1].reason == "manual_retry"

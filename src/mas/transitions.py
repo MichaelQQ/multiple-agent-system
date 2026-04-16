@@ -4,6 +4,8 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .schemas import Transition
+
 _LOG_NAME = ".transitions.log"
 
 
@@ -20,8 +22,8 @@ def log_transition(task_dir: Path, from_state: str, to_state: str, reason: str) 
         os.close(fd)
 
 
-def read_transitions(task_dir: Path, limit: int | None = None) -> list[dict[str, str]]:
-    """Read and parse .transitions.log; returns list of dicts (newest last)."""
+def read_transitions(task_dir: Path, limit: int | None = None) -> list[Transition]:
+    """Read and parse .transitions.log; returns list of Transitions (newest last)."""
     path = task_dir / _LOG_NAME
     if not path.exists():
         return []
@@ -32,7 +34,7 @@ def read_transitions(task_dir: Path, limit: int | None = None) -> list[dict[str,
     for line in lines:
         parts = line.split("|", 3)
         if len(parts) == 4:
-            result.append({"timestamp": parts[0], "from": parts[1], "to": parts[2], "reason": parts[3]})
+            result.append(Transition.model_validate({"timestamp": parts[0], "from": parts[1], "to": parts[2], "reason": parts[3]}))
     return result
 
 

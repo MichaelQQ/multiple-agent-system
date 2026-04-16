@@ -85,6 +85,35 @@ class ProviderConfig(BaseModel):
     extra_args: list[str] = Field(default_factory=list)
 
 
+class Transition(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    timestamp: str
+    from_state: str = Field(alias="from")
+    to_state: str = Field(alias="to")
+    reason: str
+
+
+class ProposerSignals(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    repo_scan: str = ""
+    already_proposed: list[str] = Field(default_factory=list)
+    git_log: str = ""
+    recent_diffs: str = ""
+    ideas: str = ""
+    ci_output: str = ""
+
+
+class BoardSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    proposed: list[str]
+    doing: list[str]
+    done: list[str]
+    failed: list[str]
+
+
 class MasConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

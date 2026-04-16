@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 from typing import Literal
 
-from .schemas import Task
+from .schemas import BoardSummary, Task
 
 Column = Literal["proposed", "doing", "done", "failed"]
 COLUMNS: tuple[Column, ...] = ("proposed", "doing", "done", "failed")
@@ -148,3 +148,12 @@ def read_json(path: Path) -> dict | None:
     if not path.exists():
         return None
     return json.loads(path.read_text())
+
+
+def get_summary(mas_dir: Path) -> BoardSummary:
+    return BoardSummary(
+        proposed=[p.name for p in list_column(mas_dir, "proposed")],
+        doing=[p.name for p in list_column(mas_dir, "doing")],
+        done=[p.name for p in list_column(mas_dir, "done")],
+        failed=[p.name for p in list_column(mas_dir, "failed")],
+    )
