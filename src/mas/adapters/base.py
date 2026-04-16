@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import abc
+import logging
 import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 from ..schemas import ProviderConfig, RoleConfig
+
+log = logging.getLogger("mas.adapters")
 
 
 @dataclass
@@ -58,7 +61,7 @@ class Adapter(abc.ABC):
                 stdin=subprocess.PIPE if stdin_text is not None else subprocess.DEVNULL,
                 stdout=log_fh,
                 stderr=log_fh,
-                start_new_session=True,  # detach: survives parent exit
+                start_new_session=True,
                 env=env,
             )
             if stdin_text is not None and proc.stdin is not None:
@@ -68,6 +71,10 @@ class Adapter(abc.ABC):
                     proc.stdin.close()
         finally:
             log_fh.close()
+        log.info(
+            "dispatched",
+            extra={"task_id": task_dir.name, "role": role, "provider": self.name, "pid": proc.pid},
+        )
         return DispatchHandle(
             pid=proc.pid,
             provider=self.name,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import shutil
 import subprocess
 import sys
@@ -12,6 +13,7 @@ from rich.table import Table
 
 from . import board, cron, daemon, transitions, worktree
 from .config import PROJECT_DIR_NAME, project_dir, project_root
+from .logging import setup_logging
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 console = Console()
@@ -97,8 +99,11 @@ def upgrade(
 
 
 @app.command()
-def tick() -> None:
+def tick(
+    verbose: bool = typer.Option(False, "--verbose", help="Enable verbose (DEBUG) logging"),
+) -> None:
     """Run a single tick of the orchestrator."""
+    setup_logging(logging.DEBUG if verbose else logging.INFO)
     from .tick import run_tick
 
     run_tick()

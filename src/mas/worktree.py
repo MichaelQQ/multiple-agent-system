@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
 import subprocess
 from pathlib import Path
+
+log = logging.getLogger("mas.worktree")
 
 
 class WorktreeError(RuntimeError):
@@ -31,9 +34,7 @@ def create(repo: Path, task_id: str, worktree_path: Path) -> Path:
     branch = branch_name(task_id)
     worktree_path = worktree_path.resolve()
 
-    # Recover from a half-created state: branch exists but worktree dir missing/partial.
     if worktree_path.exists() and not (worktree_path / ".git").exists():
-        # Incomplete dir — remove it before retrying.
         import shutil
         shutil.rmtree(worktree_path)
 
@@ -46,6 +47,7 @@ def create(repo: Path, task_id: str, worktree_path: Path) -> Path:
         _git(repo, "worktree", "add", str(worktree_path), branch)
     else:
         _git(repo, "worktree", "add", "-b", branch, str(worktree_path))
+    log.info("worktree created", extra={"task_id": task_id, "branch": branch})
     return worktree_path
 
 
@@ -63,8 +65,10 @@ def commit_changes(worktree_path: Path, message: str) -> bool:
 
 
 def prune(repo: Path, worktree_path: Path, *, keep_branch: bool = True) -> None:
+    branch = branch_name(worktree_path.name)
     if worktree_path.exists():
         _git(repo, "worktree", "remove", "--force", str(worktree_path), check=False)
     _git(repo, "worktree", "prune", check=False)
     if not keep_branch:
-        _git(repo, "branch", "-D", branch_name(worktree_path.name), check=False)
+        _git(repo, "branch", "-D", branch, check=False)
+    log.info("worktree pruned", extra={"branch": branch, "keep_branch": keep_branch})
