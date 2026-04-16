@@ -64,6 +64,20 @@ def test_other_permission_modes_omit_flag():
         assert "--dangerously-skip-permissions" not in cmd
 
 
+def test_external_task_dir_adds_dangerously_skip(tmp_path):
+    cwd = tmp_path / "worktree"
+    task_dir = tmp_path / "tasks" / "doing" / "task-abc"
+    cmd = _adapter().build_command("do it", task_dir, cwd)
+    assert "--dangerously-skip-permissions" in cmd
+
+
+def test_internal_task_dir_omits_dangerously_skip(tmp_path):
+    cwd = tmp_path / "worktree"
+    task_dir = cwd / "subtask"
+    cmd = _adapter().build_command("do it", task_dir, cwd)
+    assert "--dangerously-skip-permissions" not in cmd
+
+
 def test_extra_args_appended():
     cmd = _adapter(extra_args=["--format", "json"]).build_command(
         "do it", _DUMMY_PATH, _DUMMY_PATH

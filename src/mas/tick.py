@@ -97,13 +97,14 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
         result = board.read_result(parent_dir)
         if result is None and _worker_orphaned(parent_dir, "proposer", parent_task.attempt):
             failed_dir = env.mas / "tasks" / "failed" / parent_task.id
-            board.move(parent_dir, failed_dir)
+            board.move(parent_dir, failed_dir, reason="orphan_detected")
             return
         if result is not None:
             col = "done" if result.status == "success" else "failed"
             if result.status == "success":
                 _materialize_proposal(env, result)
-            board.move(parent_dir, env.mas / "tasks" / col / parent_task.id)
+            board.move(parent_dir, env.mas / "tasks" / col / parent_task.id,
+                       reason="role_success" if result.status == "success" else "role_failed")
             return
         # Never dispatched (no log file, no result) — dispatch now.
         log_path = parent_dir / "logs" / f"proposer-{parent_task.attempt}.log"
@@ -227,7 +228,7 @@ def _retry_or_fail_orchestrator(env: TickEnv, parent_dir: Path, parent_task: Tas
             "orchestrator exited without plan.json" + (f"\n{tail}" if tail else "")
         )
         return
-    board.move(parent_dir, env.mas / "tasks" / "failed" / parent_task.id)
+    board.move(parent_dir, env.mas / "tasks" / "failed" / parent_task.id, reason="max_retries_exceeded")
 
 
 def _role_running(pid_dir: Path, role: str) -> bool:
@@ -310,7 +311,7 @@ def _handle_child_result(env, parent_dir, parent_task, plan, spec, result):
 
     # Retries exhausted → move parent to failed/
     failed_dir = env.mas / "tasks" / "failed" / parent_task.id
-    board.move(parent_dir, failed_dir)
+    board.move(parent_dir, failed_dir, reason="max_retries_exceeded")
 
 
 def _append_revision_cycle(parent_dir: Path, plan: Plan, parent_task, feedback: str) -> None:
@@ -339,7 +340,7 @@ def _finalize_parent(env: TickEnv, parent_dir: Path, parent_task) -> None:
     wt = parent_dir / "worktree"
     worktree.prune(env.repo, wt, keep_branch=True)
     dst = env.mas / "tasks" / "done" / parent_task.id
-    board.move(parent_dir, dst)
+    board.move(parent_dir, dst, reason="role_success")
 
 
 # --- 3. Proposer ------------------------------------------------------------

@@ -49,7 +49,12 @@ def list_column(mas_dir: Path, column: Column) -> list[Path]:
     return sorted(p for p in d.iterdir() if p.is_dir())
 
 
-def move(src: Path, dst: Path) -> Path:
+def move(src: Path, dst: Path, *, reason: str = "") -> Path:
+    from . import transitions as _tr
+    # Infer states from path components before moving.
+    from_state = src.parent.name  # e.g. "proposed", "doing", "done", "failed"
+    to_state = dst.parent.name
+    _tr.log_transition(src, from_state, to_state, reason)
     dst.parent.mkdir(parents=True, exist_ok=True)
     if dst.exists():
         raise FileExistsError(f"destination exists: {dst}")
@@ -62,6 +67,10 @@ def write_task(dir_: Path, task: Task) -> Path:
     dir_.mkdir(parents=True, exist_ok=True)
     p = dir_ / "task.json"
     p.write_text(task.model_dump_json(indent=2))
+    # Create initial transition log entry for new tasks.
+    from . import transitions as _tr
+    state = dir_.parent.name  # e.g. "proposed", "doing"
+    _tr.ensure_initial_log(dir_, state)
     return p
 
 

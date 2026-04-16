@@ -1,0 +1,154 @@
+from __future__ import annotations
+
+import threading
+from pathlib import Path
+
+import pytest
+
+from mas import transitions
+from mas.transitions import ensure_initial_log, log_transition, read_transitions
+
+
+# --- log_transition -----------------------------------------------------------
+
+
+def test_log_transition_creates_file(tmp_path):
+    log_transition(tmp_path, "none", "proposed", "created")
+    assert (tmp_path / ".transitions.log").exists()
+
+
+def test_log_transition_appends(tmp_path):
+    log_transition(tmp_path, "none", "proposed", "created")
+    log_transition(tmp_path, "proposed", "doing", "promoted")
+    lines = (tmp_path / ".transitions.log").read_text().splitlines()
+    assert len(lines) == 2
+    assert "proposed→doing" not in lines[0]  # order check via content
+    assert "promoted" in lines[1]
+
+
+def test_log_format(tmp_path):
+    log_transition(tmp_path, "proposed", "doing", "promoted")
+    line = (tmp_path / ".transitions.log").read_text().strip()
+    parts = line.split("|")
+    assert len(parts) == 4
+    ts, from_s, to_s, reason = parts
+    assert "T" in ts  # ISO8601
+    assert from_s == "proposed"
+    assert to_s == "doing"
+    assert reason == "promoted"
+
+
+# --- read_transitions ---------------------------------------------------------
+
+
+def test_read_transitions(tmp_path):
+    log_transition(tmp_path, "none", "proposed", "created")
+    log_transition(tmp_path, "proposed", "doing", "promoted")
+    result = read_transitions(tmp_path)
+    assert len(result) == 2
+    assert result[0]["from"] == "none"
+    assert result[1]["to"] == "doing"
+    assert result[1]["reason"] == "promoted"
+
+
+def test_read_transitions_limit(tmp_path):
+    for i in range(5):
+        log_transition(tmp_path, str(i), str(i + 1), f"step{i}")
+    result = read_transitions(tmp_path, limit=3)
+    assert len(result) == 3
+    assert result[0]["reason"] == "step2"
+
+
+def test_read_transitions_empty(tmp_path):
+    assert read_transitions(tmp_path) == []
+
+
+# --- ensure_initial_log -------------------------------------------------------
+
+
+def test_ensure_initial_log(tmp_path):
+    ensure_initial_log(tmp_path, "proposed")
+    result = read_transitions(tmp_path)
+    assert len(result) == 1
+    assert result[0]["from"] == "none"
+    assert result[0]["to"] == "proposed"
+    assert result[0]["reason"] == "created"
+
+
+def test_ensure_initial_log_idempotent(tmp_path):
+    ensure_initial_log(tmp_path, "proposed")
+    ensure_initial_log(tmp_path, "proposed")
+    assert len(read_transitions(tmp_path)) == 1
+
+
+# --- board integration --------------------------------------------------------
+
+
+def test_board_move_logs_transition(tmp_path):
+    from mas import board
+    from mas.schemas import Task
+
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    src = mas / "tasks" / "proposed" / "task-abc"
+    task = Task(id="task-abc", role="orchestrator", goal="test goal")
+    board.write_task(src, task)
+
+    dst = mas / "tasks" / "doing" / "task-abc"
+    board.move(src, dst)
+
+    result = read_transitions(dst)
+    assert any(r["from"] == "proposed" and r["to"] == "doing" for r in result)
+
+
+def test_board_move_with_reason(tmp_path):
+    from mas import board
+    from mas.schemas import Task
+
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    src = mas / "tasks" / "proposed" / "task-xyz"
+    task = Task(id="task-xyz", role="orchestrator", goal="test")
+    board.write_task(src, task)
+
+    dst = mas / "tasks" / "doing" / "task-xyz"
+    board.move(src, dst, reason="manual_promote")
+
+    result = read_transitions(dst)
+    assert result[-1]["reason"] == "manual_promote"
+
+
+# --- concurrent writes --------------------------------------------------------
+
+
+def test_concurrent_writes(tmp_path):
+    errors = []
+
+    def writer():
+        try:
+            for _ in range(10):
+                log_transition(tmp_path, "a", "b", "concurrent")
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=writer) for _ in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors
+    lines = (tmp_path / ".transitions.log").read_text().splitlines()
+    assert len(lines) == 100
+    for line in lines:
+        parts = line.split("|")
+        assert len(parts) == 4, f"malformed line: {line!r}"
+
+
+def test_existing_task_without_log(tmp_path):
+    """Calling log_transition on a task dir that has no .transitions.log works."""
+    assert not (tmp_path / ".transitions.log").exists()
+    log_transition(tmp_path, "doing", "failed", "max_retries_exceeded")
+    result = read_transitions(tmp_path)
+    assert len(result) == 1
+    assert result[0]["reason"] == "max_retries_exceeded"
