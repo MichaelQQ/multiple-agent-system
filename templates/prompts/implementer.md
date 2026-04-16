@@ -15,7 +15,7 @@ $previous_failure
 
 ## Output
 
-When done, write `./result.json`:
+When done, write `$task_dir/result.json` (do **not** write it inside the worktree):
 
 - `status`: "success" if edits complete, else "failure"
 - `summary`: what you changed

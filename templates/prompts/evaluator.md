@@ -15,7 +15,7 @@ $previous_failure
 
 ## Output
 
-Write `./result.json` with:
+Write `$task_dir/result.json` (do **not** write it inside the worktree) with:
 
 - `status`: "success"
 - `verdict`: "pass" | "fail" | "needs_revision"
