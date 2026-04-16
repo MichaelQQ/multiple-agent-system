@@ -1,6 +1,6 @@
 # mas — Multi-Agents Orchestration System
 
-Coordinate multiple coding CLIs (Claude Code, Codex, Gemini CLI, Ollama) as a
+Coordinate multiple coding CLIs (Claude Code, Codex, Gemini CLI, Ollama, OpenCode) as a
 role-based team driven by a directory-as-job-board. Design details:
 [`docs/PLAN.md`](docs/PLAN.md).
 
@@ -25,13 +25,19 @@ mas init                      # creates .mas/ with config, roles, prompts
 Edit `.mas/config.yaml` (provider CLIs and concurrency caps) and
 `.mas/roles.yaml` (role → provider/model/timeouts/allowlists). Defaults bind:
 
-| role         | provider     | note                               |
-|--------------|--------------|------------------------------------|
-| proposer     | claude-code  | haiku, read-only                   |
-| orchestrator | claude-code  | opus, emits plan.json              |
-| implementer  | codex        | writes code inside the worktree    |
-| tester       | gemini       | runs/authors tests                 |
-| evaluator    | ollama       | read-only verdict (pass/fail/rev)  |
+| role         | provider     | model                        | note                               |
+|--------------|--------------|------------------------------|------------------------------------|
+| proposer     | claude-code  | claude-haiku-4-5-20251001    | read-only (bypassPermissions)      |
+| orchestrator | claude-code  | claude-opus-4-6              | emits plan.json                    |
+| implementer  | opencode     | —                            | writes code inside the worktree    |
+| tester       | opencode     | —                            | runs/authors tests                 |
+| evaluator    | ollama       | gemma4:e4b                   | read-only verdict (pass/fail/rev)  |
+
+> **Quota overrides:** When Gemini or Codex quota is available, they are preferred alternatives for the tester role. Override in `.mas/roles.yaml`:
+> ```yaml
+> tester:
+>   provider: gemini   # or codex
+> ```
 
 Seed proposer context in `.mas/ideas.md` (one bullet per idea).
 

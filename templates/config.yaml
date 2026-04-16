@@ -9,6 +9,7 @@ providers:
     cli: codex
     max_concurrent: 1
     extra_args: []
+    # Not assigned a default role. Override tester or implementer in roles.yaml when quota allows.
   gemini:
     cli: gemini
     max_concurrent: 1
@@ -16,6 +17,10 @@ providers:
   ollama:
     cli: ollama
     max_concurrent: 4
+    extra_args: []
+  opencode:
+    cli: opencode
+    max_concurrent: 2
     extra_args: []
 
 proposer_signals:

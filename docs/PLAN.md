@@ -22,9 +22,9 @@ The user wants strict structured data between agents (JSON files, no prose hand-
 | 8 | Scope | Per-project tool. Global install; invoked inside any project. `.mas/` per project holds config, prompts, tasks, logs. Global defaults in `~/.config/mas/`. |
 | 9 | Sandboxing | Git worktree per parent task at `.mas/tasks/{id}/worktree/` on branch `mas/{id}`. Shared across the parent's children. Pruned on `done/`. |
 | 10 | Role prompts | One expert prompt template per role at `.mas/prompts/{role}.md`. Rendered with task variables at dispatch. No composable skill system. |
-| 11 | Providers v1 | 4 adapters. 3 agentic (Claude Code, Codex, Gemini CLI) — given a workspace, explore and write `result.json` themselves. 1 text (Ollama) — tick pre-gathers context, pipes prompt via stdin, parses JSON from stdout. Common `Adapter.run(role_config, task_dir) -> Result` interface. |
-| 12 | Default role → provider | proposer=Claude Code (Haiku) · orchestrator=Claude Code (Opus) · implementer=Codex · tester=Gemini CLI · evaluator=Ollama. Overridable in `roles.yaml`. |
-| 13 | Concurrency | Per-provider `max_concurrent` cap. Defaults: claude-code=2, codex=1, gemini=1, ollama=4. Each tick counts live PID files per provider; skips dispatch when capped. |
+| 11 | Providers v1 | 5 adapters. 4 agentic (Claude Code, Codex, Gemini CLI, OpenCode) — given a workspace, explore and write `result.json` themselves. 1 text (Ollama) — tick pre-gathers context, pipes prompt via stdin, parses JSON from stdout. Common `Adapter.run(role_config, task_dir) -> Result` interface. |
+| 12 | Default role → provider | proposer=Claude Code (`claude-haiku-4-5-20251001`) · orchestrator=Claude Code (`claude-opus-4-6`) · implementer=OpenCode · tester=OpenCode · evaluator=Ollama (`gemma4:e4b`). Overridable in `roles.yaml`. **When Gemini quota is available, prefer it for tester** (dedicated test CLI). **When Codex quota is available, it is a viable alternative for tester or implementer.** |
+| 13 | Concurrency | Per-provider `max_concurrent` cap. Defaults: claude-code=2, codex=1, gemini=1, ollama=4, opencode=2. Each tick counts live PID files per provider; skips dispatch when capped. |
 | 14 | Failure policy | Per-role `max_retries` (default 2) with backoff. Each retry's `task.json` carries a `previous_failure` summary so the agent can learn. Exhausted retries → `tasks/failed/{id}/` with full forensic state. `mas retry <id>` pushes back to `doing/`. |
 | 15 | Proposer inputs | Four signals, pre-gathered by tick: (a) repo scan, (b) recent git log + diffs, (c) `.mas/ideas.md`, (d) local CI / test failure command output (configurable). |
 | 16 | Pipeline driver | Orchestrator emits **child tasks** (visible on board). Tick dispatches children; orchestrator itself is short-lived. |
@@ -36,7 +36,7 @@ The user wants strict structured data between agents (JSON files, no prose hand-
 
 ## Shipping defaults (pushable-back)
 
-- **Tool allowlists** in role config. `evaluator` = read-only (Read, Grep, Glob). `proposer` = read-only. `orchestrator` = read + write `task.json`/`plan.json`/subtask dirs (no source edits). `implementer`, `tester` = full (Read, Edit, Write, Bash, etc.). Enforced per-provider via adapter flags (e.g., Claude Code `--permission-mode` + `--allowedTools`).
+- **Tool allowlists** in role config. `evaluator` = read-only (Read, Grep, Glob), `permission_mode: bypassPermissions`. `proposer` = read-only (Read, Grep, Glob), `permission_mode: bypassPermissions`. `orchestrator` = read + write `task.json`/`plan.json`/subtask dirs (no source edits), `permission_mode: default`. `implementer`, `tester` = full (Read, Edit, Write, Bash, etc.). Enforced per-provider via adapter flags (e.g., Claude Code `--permission-mode` + `--allowedTools`).
 - **Cost/usage tracking**: each adapter emits `tokens_in`, `tokens_out`, `duration_s`, `cost_usd` into `result.json` when the provider reports them (Claude Code does, Ollama emits duration only). Aggregated by `mas stats` in v2; v1 just records.
 - **Logging**: per-task logs at `.mas/tasks/{id}/logs/{role}-{attempt}.log` (stdout+stderr of the subprocess). Tick-level log at `.mas/logs/tick.log`.
 - **Task ID format**: `{yyyymmdd}-{slug}-{hash4}` (e.g., `20260414-add-retry-logic-a3f9`).
