@@ -135,7 +135,7 @@ def promote(task_id: str) -> None:
         typer.echo(f"not found: {src}")
         raise typer.Exit(1)
     dst = mas / "tasks" / "doing" / task_id
-    board.move(src, dst)
+    board.move(src, dst, reason="manual_promote")
     typer.echo(f"promoted {task_id}")
 
 
