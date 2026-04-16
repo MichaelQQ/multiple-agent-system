@@ -119,7 +119,7 @@ def show() -> None:
                 goal = "?"
             txns = transitions.read_transitions(d, limit=5)
             txn_str = "\n".join(
-                f"{x['timestamp'][11:19]} {x['from']}→{x['to']} ({x['reason']})"
+                f"{x.timestamp[11:19]} {x.from_state}→{x.to_state} ({x.reason})"
                 for x in txns
             ) if txns else ""
             table.add_row(col, d.name, t.role if t else "?", goal, txn_str)
