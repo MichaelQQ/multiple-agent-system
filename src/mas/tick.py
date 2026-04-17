@@ -174,10 +174,23 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
         goal=next_child.goal,
         inputs=next_child.inputs,
         constraints=next_child.constraints,
+        prior_results=_collect_prior_results(plan, next_child.id, subtasks_root),
         cycle=parent_task.cycle,
         attempt=child_attempt,
     )
     _dispatch_role(env, child_task, child_dir, wt, role=next_child.role)
+
+
+def _collect_prior_results(plan: Plan, current_id: str, subtasks_root: Path) -> list[Result]:
+    """Return results of subtasks that precede current_id in plan order."""
+    priors: list[Result] = []
+    for spec in plan.subtasks:
+        if spec.id == current_id:
+            break
+        r = board.read_result(subtasks_root / spec.id)
+        if r is not None:
+            priors.append(r)
+    return priors
 
 
 def _read_attempt(path: Path) -> int:
@@ -337,10 +350,10 @@ def _append_revision_cycle(parent_dir: Path, plan: Plan, parent_task, feedback: 
     cycle_n = existing_cycles + 1
     base_inputs = {"feedback": feedback, "parent_goal": parent_task.goal}
     new_children = [
-        SubtaskSpec(id=f"rev-{cycle_n}-implementer", role="implementer",
-                    goal=f"Address evaluator feedback (cycle {cycle_n})", inputs=base_inputs),
         SubtaskSpec(id=f"rev-{cycle_n}-tester", role="tester",
-                    goal=f"Verify revision {cycle_n}", inputs=base_inputs),
+                    goal=f"Augment tests to cover evaluator feedback (cycle {cycle_n})", inputs=base_inputs),
+        SubtaskSpec(id=f"rev-{cycle_n}-implementer", role="implementer",
+                    goal=f"Address evaluator feedback and make tests pass (cycle {cycle_n})", inputs=base_inputs),
         SubtaskSpec(id=f"rev-{cycle_n}-evaluator", role="evaluator",
                     goal=f"Evaluate revision {cycle_n}", inputs=base_inputs),
     ]

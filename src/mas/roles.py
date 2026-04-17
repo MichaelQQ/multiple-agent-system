@@ -34,6 +34,10 @@ Your last action MUST be writing a valid `result.json` to the path in the
 
 def render_prompt(template_path: Path, task: Task, **extra: Any) -> str:
     tmpl = Template(template_path.read_text())
+    prior_results_json = json.dumps(
+        [r.model_dump(mode="json", exclude_none=True) for r in task.prior_results],
+        indent=2,
+    )
     vars_ = {
         "task_id": task.id,
         "role": task.role,
@@ -44,6 +48,7 @@ def render_prompt(template_path: Path, task: Task, **extra: Any) -> str:
         "previous_failure": task.previous_failure or "",
         "inputs_json": json.dumps(task.inputs, indent=2),
         "constraints_json": json.dumps(task.constraints, indent=2),
+        "prior_results_json": prior_results_json,
         "result_schema": _RESULT_SCHEMA_HINT,
     }
     vars_.update({k: str(v) for k, v in extra.items()})

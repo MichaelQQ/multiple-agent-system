@@ -69,3 +69,40 @@ def test_rendered_child_prompt_contains_absolute_result_path(tmp_path: Path, rol
 
     assert subtask_dir + "/result.json" in rendered
     assert "./result.json" not in rendered
+
+
+def test_render_prompt_injects_prior_results_json(tmp_path: Path):
+    """prior_results on the task are rendered as JSON into $prior_results_json."""
+    from mas.schemas import Result
+
+    template = tmp_path / "p.md"
+    template.write_text("Priors:\n$prior_results_json\n")
+
+    task = Task(
+        id="impl-1",
+        role="implementer",
+        goal="make tests pass",
+        parent_id="p",
+        prior_results=[
+            Result(
+                task_id="test-1",
+                status="success",
+                summary="failing tests authored",
+                handoff={"test_command": "pytest -q", "test_files": ["tests/x.py"]},
+            ),
+        ],
+    )
+    rendered = render_prompt(template, task, task_dir=str(tmp_path), worktree=str(tmp_path))
+
+    assert '"task_id": "test-1"' in rendered
+    assert '"test_command": "pytest -q"' in rendered
+
+
+@pytest.mark.parametrize("role", ["tester", "implementer", "evaluator"])
+def test_tdd_child_templates_reference_prior_results(role: str):
+    """TDD child templates must surface $prior_results_json so the subtask
+    can see preceding siblings' result.json (e.g. tester handoff)."""
+    template = TEMPLATES_DIR / f"{role}.md"
+    assert "$prior_results_json" in template.read_text(), (
+        f"templates/prompts/{role}.md must reference $prior_results_json"
+    )

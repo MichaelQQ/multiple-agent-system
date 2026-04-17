@@ -32,6 +32,7 @@ from mas.tick import (
     _advance_one,
     _all_children_passed,
     _append_revision_cycle,
+    _collect_prior_results,
     _finalize_parent,
     _handle_child_result,
     _materialize_plan,
@@ -441,6 +442,99 @@ def test_skip_dispatch_if_role_already_running(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
+# 4b. _collect_prior_results + dispatch-time prior_results injection
+# ---------------------------------------------------------------------------
+
+def test_collect_prior_results_returns_preceding_siblings(tmp_path: Path):
+    """Only subtasks before current_id with a result.json are returned, in plan order."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent = board.task_dir(mas, "doing", "p-pr1")
+    parent.mkdir(parents=True)
+    subtasks = parent / "subtasks"
+    subtasks.mkdir()
+    plan = Plan(
+        parent_id="p-pr1", summary="s",
+        subtasks=[
+            SubtaskSpec(id="test-1", role="tester", goal="t"),
+            SubtaskSpec(id="impl-1", role="implementer", goal="i"),
+            SubtaskSpec(id="eval-1", role="evaluator", goal="e"),
+        ],
+    )
+    d = subtasks / "test-1"
+    d.mkdir()
+    (d / "result.json").write_text(
+        Result(task_id="test-1", status="success", summary="tests written",
+               handoff={"test_command": "pytest tests/new.py", "test_files": ["tests/new.py"]}
+               ).model_dump_json()
+    )
+
+    priors = _collect_prior_results(plan, "impl-1", subtasks)
+    assert [r.task_id for r in priors] == ["test-1"]
+    assert priors[0].handoff["test_command"] == "pytest tests/new.py"
+
+
+def test_collect_prior_results_empty_for_first_subtask(tmp_path: Path):
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent = board.task_dir(mas, "doing", "p-pr2")
+    parent.mkdir(parents=True)
+    subtasks = parent / "subtasks"
+    subtasks.mkdir()
+    plan = Plan(
+        parent_id="p-pr2", summary="s",
+        subtasks=[SubtaskSpec(id="test-1", role="tester", goal="t")],
+    )
+
+    assert _collect_prior_results(plan, "test-1", subtasks) == []
+
+
+def test_dispatch_injects_prior_results_into_task_json(tmp_path: Path):
+    """When the implementer is dispatched, its task.json carries tester's result."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent = board.task_dir(mas, "doing", "p-pr3")
+    parent.mkdir(parents=True)
+    board.write_task(parent, Task(id="p-pr3", role="orchestrator", goal="g"))
+    (parent / "worktree").mkdir()
+    plan = Plan(
+        parent_id="p-pr3", summary="s",
+        subtasks=[
+            SubtaskSpec(id="test-1", role="tester", goal="t"),
+            SubtaskSpec(id="impl-1", role="implementer", goal="i"),
+        ],
+    )
+    (parent / "plan.json").write_text(plan.model_dump_json())
+    subtasks = parent / "subtasks"
+    test_dir = subtasks / "test-1"
+    test_dir.mkdir(parents=True)
+    (test_dir / "result.json").write_text(
+        Result(task_id="test-1", status="success", summary="failing tests authored",
+               handoff={"test_command": "pytest -q", "test_files": ["tests/x.py"],
+                        "initial_exit_code": 1, "expected_exit_code_after_impl": 0}
+               ).model_dump_json()
+    )
+    impl_dir = subtasks / "impl-1"
+    impl_dir.mkdir()
+
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg())
+
+    with patch("mas.tick.get_adapter") as mock_get, \
+         patch("mas.board.count_active_pids", return_value=0), \
+         patch("mas.board.write_pid"):
+        mock_adapter = MagicMock()
+        mock_adapter.dispatch.return_value = MagicMock(pid=12345)
+        mock_adapter.agentic = False
+        mock_get.return_value.return_value = mock_adapter
+        _advance_one(env, parent)
+
+    impl_task = board.read_task(impl_dir)
+    assert len(impl_task.prior_results) == 1
+    assert impl_task.prior_results[0].task_id == "test-1"
+    assert impl_task.prior_results[0].handoff["test_command"] == "pytest -q"
+
+
+# ---------------------------------------------------------------------------
 # 5. _handle_child_result
 # ---------------------------------------------------------------------------
 
@@ -630,6 +724,26 @@ def test_append_revision_cycle_adds_three_subtasks(tmp_path: Path):
     assert "rev-1-implementer" in ids
     assert "rev-1-tester" in ids
     assert "rev-1-evaluator" in ids
+
+
+def test_append_revision_cycle_orders_tester_before_implementer(tmp_path: Path):
+    """Under TDD the revision cycle is tester → implementer → evaluator."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent = board.task_dir(mas, "doing", "p-12b")
+    parent.mkdir(parents=True)
+    board.write_task(parent, Task(id="p-12b", role="orchestrator", goal="g"))
+    (parent / "subtasks").mkdir()
+    plan = Plan(parent_id="p-12b", summary="s",
+                subtasks=[SubtaskSpec(id="eval-1", role="evaluator", goal="eval")],
+                max_revision_cycles=2)
+    (parent / "plan.json").write_text(plan.model_dump_json())
+
+    _append_revision_cycle(parent, plan, board.read_task(parent), "fix it")
+
+    updated = parse_plan(parent / "plan.json", "p-12b")
+    rev = [s for s in updated.subtasks if s.id.startswith("rev-1-")]
+    assert [s.role for s in rev] == ["tester", "implementer", "evaluator"]
 
 
 def test_append_revision_cycle_respects_max_cap(tmp_path: Path):
