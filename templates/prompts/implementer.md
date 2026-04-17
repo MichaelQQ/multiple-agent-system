@@ -28,6 +28,23 @@ $previous_failure
 - Loop: edit implementation → run `test_command` → repeat until exit code is 0.
 - `status: "success"` only if `test_command` exits 0 with all tests passing.
 
+### Docs-only mode
+
+If `constraints.docs_only` is true, this is a documentation subtask:
+
+- **Do not** modify code or tests. Only edit documentation files (e.g.
+  `README.md`, `CHANGELOG.md`, files under `docs/`, and any other docs that
+  reference behavior changed by prior subtasks).
+- There is no `test_command` to satisfy. Instead, read the prior implementer
+  result's `handoff.changed_files` and `summary` to determine what changed,
+  then update the affected docs to match.
+- Always update `CHANGELOG.md` (create it at the repo root if missing, using
+  Keep a Changelog format under an `## [Unreleased]` section).
+- Always update `README.md` if the change touches installation, CLI commands,
+  config, or public API.
+- `status: "success"` if docs are updated and consistent with the change; set
+  `artifacts` to the list of doc files you edited.
+
 ## Output
 
 When done, write `$task_dir/result.json` (do **not** write it inside the worktree):
