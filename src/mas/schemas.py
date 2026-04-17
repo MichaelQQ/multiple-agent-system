@@ -24,6 +24,7 @@ class Task(BaseModel):
     inputs: dict[str, Any] = Field(default_factory=dict)
     constraints: dict[str, Any] = Field(default_factory=dict)
     previous_failure: str | None = None
+    prior_results: list["Result"] = Field(default_factory=list)
     cycle: int = 0
     attempt: int = 1
     created_at: datetime = Field(default_factory=_now)
@@ -126,3 +127,6 @@ class MasConfig(BaseModel):
     @classmethod
     def _none_to_empty_dict(cls, v: Any) -> Any:
         return {} if v is None else v
+
+
+Task.model_rebuild()
