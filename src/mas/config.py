@@ -5,7 +5,9 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from pydantic import ValidationError as PydanticValidationError
 
+from .errors import ConfigValidationError
 from .schemas import MasConfig
 
 log = logging.getLogger("mas.config")
@@ -58,4 +60,30 @@ def load_config(project: Path | None = None) -> MasConfig:
     if roles:
         merged["roles"] = roles.get("roles", roles)
     log.debug("config loaded", extra={"path": str(proj / "config.yaml")})
-    return MasConfig.model_validate(merged)
+
+    try:
+        config = MasConfig.model_validate(merged)
+    except PydanticValidationError as exc:
+        raise ConfigValidationError.from_pydantic(exc)
+
+    _validate_cross_field_constraints(config)
+
+    return config
+
+
+def _validate_cross_field_constraints(config: MasConfig) -> None:
+    errors: list[dict] = []
+    for role_name, role_cfg in config.roles.items():
+        if role_cfg.provider not in config.providers:
+            errors.append({
+                "field": f"roles.{role_name}.provider",
+                "message": f"Provider '{role_cfg.provider}' is not defined in the providers section",
+                "input": role_cfg.provider,
+            })
+    if errors:
+        lines = ["Configuration validation failed:"]
+        for e in errors:
+            lines.append(f"  - Field '{e['field']}': {e['message']}")
+            lines.append(f"    Received: {e['input']}")
+            lines.append(f"    Available providers: {list(config.providers.keys())}")
+        raise ConfigValidationError(message="\n".join(lines), errors=errors)
