@@ -241,3 +241,151 @@ def test_wrapper_missing_status_field_writes_failure(tmp_path, mock_ollama):
     result = _read_result(task_dir)
     assert result["status"] == "failure"
     assert "no valid result JSON" in result["summary"]
+
+
+def test_wrapper_connection_refused_writes_failure(tmp_path):
+    task_dir, proc = _run_wrapper(
+        tmp_path, "http://127.0.0.1:1", env_overrides={"OLLAMA_HOST": "http://127.0.0.1:1"}
+    )
+    assert proc.returncode == 1
+
+    result = _read_result(task_dir)
+    assert result["status"] == "failure"
+    assert "ollama HTTP call failed" in result["summary"]
+    assert result["feedback"] is not None
+
+
+def test_wrapper_timeout_writes_failure(tmp_path):
+    mock = _MockOllama()
+    mock.response_payload = {
+        "response": json.dumps({"status": "success", "summary": "ok"}),
+        "done_reason": "stop",
+    }
+
+    class SlowHandler(mock.make_handler()):
+        def do_POST(self):
+            import time
+
+            time.sleep(10)
+            super().do_POST()
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), SlowHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    mock.url = f"http://127.0.0.1:{server.server_address[1]}"
+
+    try:
+        task_dir, proc = _run_wrapper(
+            tmp_path,
+            mock.url,
+            env_overrides={"MAS_OLLAMA_TIMEOUT": "2"},
+        )
+        assert proc.returncode == 1
+
+        result = _read_result(task_dir)
+        assert result["status"] == "failure"
+        assert "timeout" in result["summary"].lower()
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_wrapper_empty_response_writes_failure(tmp_path, mock_ollama):
+    mock_ollama.response_payload = {"response": "", "done_reason": "stop"}
+    task_dir, proc = _run_wrapper(tmp_path, mock_ollama.url)
+    assert proc.returncode == 1
+
+    result = _read_result(task_dir)
+    assert result["status"] == "failure"
+    assert "no valid result JSON" in result["summary"]
+    Result.model_validate(result)
+
+
+def test_wrapper_malformed_json_in_response_writes_failure(tmp_path, mock_ollama):
+    mock_ollama.response_payload = {
+        "response": "not json at all {{{garbage",
+        "done_reason": "stop",
+    }
+    task_dir, proc = _run_wrapper(tmp_path, mock_ollama.url)
+    assert proc.returncode == 1
+
+    result = _read_result(task_dir)
+    assert result["status"] == "failure"
+    assert "no valid result JSON" in result["summary"]
+    Result.model_validate(result)
+
+
+def test_wrapper_api_error_response_writes_failure(tmp_path, mock_ollama):
+    mock_ollama.response_status = 400
+    mock_ollama.response_payload = {"error": "model not found"}
+    task_dir, proc = _run_wrapper(tmp_path, mock_ollama.url)
+    assert proc.returncode == 1
+
+    result = _read_result(task_dir)
+    assert result["status"] == "failure"
+    assert "ollama HTTP call failed" in result["summary"]
+    Result.model_validate(result)
+
+
+def test_write_failure_populates_all_result_fields(tmp_path, mock_ollama):
+    mock_ollama.response_status = 500
+    mock_ollama.response_payload = {"error": "boom"}
+    task_dir, proc = _run_wrapper(tmp_path, mock_ollama.url)
+
+    result = _read_result(task_dir)
+    Result.model_validate(result)
+
+    assert result["task_id"] == "taskdir-abc"
+    assert result["status"] == "failure"
+    assert result["summary"] is not None
+    assert result["artifacts"] == []
+    assert result["handoff"] is None
+    assert result["verdict"] is None
+    assert result["feedback"] is not None
+    assert result["tokens_in"] is None
+    assert result["tokens_out"] is None
+    assert result["duration_s"] == 0.0
+    assert result["cost_usd"] is None
+
+
+def test_wrapper_failure_result_includes_diagnostic_context(tmp_path, mock_ollama):
+    mock_ollama.response_status = 500
+    mock_ollama.response_payload = {"error": "internal server error"}
+    task_dir, proc = _run_wrapper(tmp_path, mock_ollama.url)
+
+    result = _read_result(task_dir)
+    assert result["status"] == "failure"
+    assert result["feedback"] is not None
+    assert "500" in result["feedback"] or "Internal Server Error" in result["feedback"]
+    assert result["summary"].startswith("ollama HTTP call failed:") or result[
+        "summary"
+    ].startswith("ollama response had")
+
+
+def test_wrapper_non_json_content_type_writes_failure(tmp_path):
+    mock = _MockOllama()
+
+    class NonJsonHandler(mock.make_handler()):
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(length)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            body = b"<html>502 Bad Gateway</html>"
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), NonJsonHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    mock.url = f"http://127.0.0.1:{server.server_address[1]}"
+
+    try:
+        task_dir, proc = _run_wrapper(tmp_path, mock.url)
+        result = _read_result(task_dir)
+        assert result["status"] == "failure"
+        Result.model_validate(result)
+    finally:
+        server.shutdown()
+        server.server_close()
