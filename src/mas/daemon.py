@@ -6,6 +6,7 @@ import os
 import signal
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 log = logging.getLogger("mas.daemon")
@@ -14,10 +15,12 @@ PID_FILENAME = "daemon.pid"
 LOG_FILENAME = "logs/daemon.log"
 
 
-def _log_tick_event(msg: str, **kwargs) -> None:
-    extra = {"component": "daemon"}
-    extra.update(kwargs)
-    log.info(msg, extra=extra)
+def _stamp() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _say(msg: str) -> None:
+    print(f"[{_stamp()}] {msg}", flush=True)
 
 
 class DaemonError(RuntimeError):
@@ -108,9 +111,14 @@ def start(project: Path, interval_seconds: int = 300) -> int:
     signal.signal(signal.SIGTERM, _handle_term)
     signal.signal(signal.SIGINT, _handle_term)
 
+    _say(
+        f"daemon started (pid={os.getpid()}, interval={interval_seconds}s, project={project})"
+    )
+
     try:
         _run_loop(project, interval_seconds, stop_flag)
     finally:
+        _say("daemon stopped")
         _clear_pid(mas)
         os._exit(0)
 
@@ -118,19 +126,22 @@ def start(project: Path, interval_seconds: int = 300) -> int:
 def _run_loop(project: Path, interval_seconds: int, stop_flag: dict) -> None:
     from .tick import run_tick
 
+    tick_num = 0
     while not stop_flag["stop"]:
+        tick_num += 1
         started = time.time()
-        stamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        print(f"=== {stamp} tick start ===", flush=True)
+        _say(f"tick #{tick_num} start")
         try:
             run_tick(start=project)
             elapsed = time.time() - started
-            _log_tick_event("tick completed", duration_s=elapsed)
-        except Exception:
+            _say(f"tick #{tick_num} done in {elapsed:.2f}s")
+        except Exception as exc:
             elapsed = time.time() - started
-            _log_tick_event("tick failed", duration_s=elapsed)
+            _say(
+                f"tick #{tick_num} failed in {elapsed:.2f}s: "
+                f"{type(exc).__name__}: {exc}"
+            )
             log.exception("tick failed")
-        print(f"=== tick done in {elapsed:.2f}s ===", flush=True)
 
         remaining = interval_seconds
         while remaining > 0 and not stop_flag["stop"]:
