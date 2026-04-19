@@ -6,7 +6,9 @@ import shutil
 from pathlib import Path
 from typing import Literal
 
-from .schemas import BoardSummary, Task
+from pydantic import ValidationError as PydanticValidationError
+from .schemas import BoardSummary, Task, Result
+from .errors import TaskReadError, ResultReadError
 
 log = logging.getLogger("mas.board")
 
@@ -79,19 +81,96 @@ def write_task(dir_: Path, task: Task) -> Path:
 
 def read_task(dir_: Path) -> Task:
     p = dir_ / "task.json"
-    data = json.loads(p.read_text())
+    try:
+        text = p.read_text(encoding="utf-8")
+    except UnicodeDecodeError as e:
+        raise TaskReadError(
+            f"Failed to read task file: encoding error",
+            path=str(p),
+            cause=e,
+        )
+    except OSError as e:
+        raise TaskReadError(
+            f"Failed to read task file: {e}",
+            path=str(p),
+            cause=e,
+        )
+
+    if not text.strip():
+        raise TaskReadError(
+            "Task file is empty",
+            path=str(p),
+            raw_snippet=text,
+        )
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise TaskReadError(
+            f"Invalid JSON",
+            path=str(p),
+            raw_snippet=text[:200],
+            cause=e,
+        )
+
     known = Task.model_fields.keys()
     data = {k: v for k, v in data.items() if k in known}
-    return Task.model_validate(data)
+
+    try:
+        return Task.model_validate(data)
+    except PydanticValidationError as e:
+        errors = []
+        for err in e.errors():
+            field = " -> ".join(str(l) for l in err["loc"])
+            errors.append(f"{field}: {err['msg']}")
+        raise TaskReadError(
+            f"Missing or invalid fields: {'; '.join(errors)}",
+            path=str(p),
+            raw_snippet=text[:200],
+            cause=e,
+        )
 
 
-def read_result(dir_: Path):
-    from .schemas import Result
-
+def read_result(dir_: Path) -> Result | None:
     p = dir_ / "result.json"
     if not p.exists():
         return None
-    return Result.model_validate_json(p.read_text())
+
+    try:
+        text = p.read_text(encoding="utf-8")
+    except UnicodeDecodeError as e:
+        raise ResultReadError(
+            f"Failed to read result file: encoding error",
+            path=str(p),
+            cause=e,
+        )
+    except OSError as e:
+        raise ResultReadError(
+            f"Failed to read result file: {e}",
+            path=str(p),
+            cause=e,
+        )
+
+    if not text.strip():
+        raise ResultReadError(
+            "Result file is empty",
+            path=str(p),
+            raw_snippet=text,
+        )
+
+    try:
+        return Result.model_validate_json(text)
+    except PydanticValidationError as e:
+        errors = []
+        for err in e.errors():
+            field = " -> ".join(str(l) for l in err["loc"])
+            errors.append(f"{field}: {err['msg']}")
+        raise ResultReadError(
+            f"Missing or invalid fields: {'; '.join(errors)}",
+            path=str(p),
+            raw_snippet=text[:200],
+            cause=e,
+        )
 
 
 def count_active_pids(mas_dir: Path, provider: str | None = None) -> int:

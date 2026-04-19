@@ -7,6 +7,7 @@ from pathlib import Path
 from string import Template
 from typing import Any
 
+from pydantic import ValidationError as PydanticValidationError
 from .schemas import Plan, ProposerSignals, Task
 
 log = logging.getLogger("mas.roles")
@@ -148,8 +149,58 @@ def _run(cmd: list[str], cwd: Path | None = None, timeout: int = 30) -> str:
 
 # --- Plan parsing -----------------------------------------------------------
 
+from .errors import PlanParseError
+
 
 def parse_plan(plan_path: Path, parent_id: str) -> Plan:
-    data = json.loads(plan_path.read_text())
+    try:
+        text = plan_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as e:
+        raise PlanParseError(
+            f"Failed to read plan file: encoding error",
+            path=str(plan_path),
+            raw_snippet="",
+            cause=e,
+        )
+    except OSError as e:
+        raise PlanParseError(
+            f"Failed to read plan file: {e}",
+            path=str(plan_path),
+            cause=e,
+        )
+
+    if not text.strip():
+        raise PlanParseError(
+            "Plan file is empty",
+            path=str(plan_path),
+            raw_snippet=text,
+        )
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise PlanParseError(
+            f"Invalid JSON: {e.msg}",
+            path=str(plan_path),
+            raw_snippet=text[:200],
+            cause=e,
+        )
+
     data.setdefault("parent_id", parent_id)
-    return Plan.model_validate(data)
+
+    known_fields = set(Plan.model_fields.keys())
+    data = {k: v for k, v in data.items() if k in known_fields}
+
+    try:
+        return Plan.model_validate(data)
+    except PydanticValidationError as e:
+        errors = []
+        for err in e.errors():
+            field = " -> ".join(str(l) for l in err["loc"])
+            errors.append(f"{field}: {err['msg']}")
+        raise PlanParseError(
+            f"Missing or invalid fields: {'; '.join(errors)}",
+            path=str(plan_path),
+            raw_snippet=text[:200],
+            cause=e,
+        )

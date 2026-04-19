@@ -110,6 +110,18 @@ Agents communicate via JSON files, never prose. Each worker reads `task.json`
 from its own directory and writes `result.json` before exiting. Stdout is
 logs only. Schemas live in `src/mas/schemas.py`.
 
+## Error handling
+
+mas uses custom exception types in `src/mas/errors.py` for clear, actionable error messages:
+
+| Exception         | Raised By                  | Includes                                         |
+|------------------|----------------------------|--------------------------------------------------|
+| `PlanParseError` | `parse_plan()` in roles.py | file path, content snippet, root cause            |
+| `TaskReadError`  | `read_task()` in board.py  | file path, content snippet, root cause          |
+| `ResultReadError`| `read_result()` in board.py| file path, content snippet, root cause          |
+
+These exceptions provide context for debugging: file path, a snippet of the problematic content, and the original exception. Extra fields in JSON files are stripped before validation for graceful degradation.
+
 ## Failure handling
 
 - Per-role `max_retries` (default 2) with the previous failure summary
