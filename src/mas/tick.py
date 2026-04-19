@@ -12,7 +12,7 @@ from typing import Iterable
 
 from . import board, transitions, worktree
 from .adapters import get_adapter
-from .config import load_config, project_root, project_dir
+from .config import load_config, project_root, project_dir, validate_config
 from .ids import task_id as new_task_id
 from .logging import get_task_logger
 from .roles import gather_proposer_signals, parse_plan, render_prompt
@@ -51,6 +51,13 @@ def run_tick(*, start: Path | None = None) -> None:
     repo = project_root(start)
     mas = project_dir(start)
     cfg = load_config(mas)
+
+    issues = validate_config(cfg, mas)
+    if issues:
+        issue_msgs = "; ".join(f"{i.field}: {i.message}" for i in issues)
+        log.error("validation failed: %s", issue_msgs)
+        raise ValueError(f"Validation failed: {issue_msgs}")
+
     env = TickEnv(repo=repo, mas=mas, cfg=cfg)
     board.ensure_layout(mas)
 

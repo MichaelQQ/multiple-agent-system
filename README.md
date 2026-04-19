@@ -44,12 +44,36 @@ Seed proposer context in `.mas/ideas.md` (one bullet per idea).
 ## Daily workflow
 
 ```sh
+mas validate                  # validate config, providers, and prompts (runs automatically before tick/daemon)
 mas tick                      # run one pass: reap → advance → dispatch
 mas show                      # print the board
 mas promote <id>              # proposed/  → doing/  (human approval gate)
 mas retry   <id>              # failed/    → doing/
 mas logs    <id> [-f]         # tail the latest worker log
 ```
+
+### Validation
+
+`mas validate` checks:
+- Config is not empty and has required fields
+- All provider CLIs are available in PATH
+- All role prompt templates exist in `.mas/prompts/`
+
+Exit codes:
+- **0** — validation passed
+- **1** — validation failed (errors printed to stderr)
+
+The `validate_config()` function is also available for programmatic use:
+
+```python
+from mas.config import validate_config, load_config, project_dir
+
+cfg = load_config(project_dir())
+issues = validate_config(cfg, project_dir())
+# issues: list[ValidationIssue] — empty if valid
+```
+
+Validation runs automatically before `mas tick` and `mas daemon start` to prevent orphaned tasks.
 
 A tick is safe to run any time — it takes a flock, reaps dead workers,
 advances the state machine, then dispatches new work within per-provider
@@ -142,7 +166,7 @@ injection, id generator.
 
 ## Scope of v1
 
-Implemented: init, tick, show, promote, retry, logs, cron install/uninstall/
+Implemented: init, validate, tick, show, promote, retry, logs, cron install/uninstall/
 status, daemon start/stop/status. Out of scope (v2): `mas pr`, `mas kill`,
 `mas prune`, `mas stats`, `mas doctor`, launchd, parallel child execution,
 auto-PR/merge.

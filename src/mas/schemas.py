@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Literal
 
@@ -8,6 +9,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 Role = Literal["proposer", "orchestrator", "implementer", "tester", "evaluator"]
 Status = Literal["success", "failure", "needs_revision"]
 Verdict = Literal["pass", "fail", "needs_revision"]
+
+
+@dataclass
+class ValidationIssue:
+    """Represents individual validation problem."""
+    field: str
+    message: str
 
 
 def _now() -> datetime:
