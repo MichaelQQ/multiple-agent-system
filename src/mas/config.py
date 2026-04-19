@@ -55,7 +55,15 @@ def load_config(project: Path | None = None) -> MasConfig:
 
     merged: dict[str, Any] = {}
     merged = _deep_merge(merged, user_cfg)
-    merged = _deep_merge(merged, proj_cfg)
+    proj_cfg_roles = proj_cfg.get("roles", {})
+    proj_cfg_providers = proj_cfg.get("providers", {})
+    if proj_cfg_providers and proj_cfg_roles:
+        merged["providers"] = proj_cfg_providers
+    else:
+        merged = _deep_merge(merged, proj_cfg)
+    for k, v in proj_cfg.items():
+        if k != "providers":
+            merged[k] = v
     roles = _deep_merge(user_roles, proj_roles)
     if roles:
         merged["roles"] = roles.get("roles", roles)
