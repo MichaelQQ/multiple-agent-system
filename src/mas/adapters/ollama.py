@@ -113,7 +113,7 @@ class OllamaAdapter(Adapter):
     @staticmethod
     def _wrapper_source() -> str:
         return textwrap.dedent("""
-            import json, os, re, sys, time, urllib.request, urllib.error
+            import json, os, re, socket, sys, time, urllib.request, urllib.error
 
             _BARE_JSON_RE = re.compile(r"(\\{[\\s\\S]*\\})")
 
@@ -148,6 +148,7 @@ class OllamaAdapter(Adapter):
             num_predict = int(os.environ.get("MAS_OLLAMA_NUM_PREDICT", "4096"))
             num_ctx = int(os.environ.get("MAS_OLLAMA_NUM_CTX", "8192"))
             temperature = float(os.environ.get("MAS_OLLAMA_TEMPERATURE", "0.2"))
+            timeout = int(os.environ.get("MAS_OLLAMA_TIMEOUT", "3600"))
 
             body = {
                 "model": model,
@@ -175,11 +176,47 @@ class OllamaAdapter(Adapter):
                     headers={"Content-Type": "application/json"},
                     method="POST",
                 )
-                with urllib.request.urlopen(req, timeout=3600) as resp:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
                     payload = json.loads(resp.read().decode())
-            except Exception as exc:
-                _write_failure(task_dir, f"ollama HTTP call failed: {exc}", str(exc))
+            except urllib.error.HTTPError as exc:
+                _write_failure(
+                    task_dir,
+                    f"ollama HTTP call failed: HTTP {exc.code}: {exc.reason}",
+                    str(exc),
+                )
                 print(f"[ollama-wrapper] wrote failure result.json (http error: {exc})", flush=True)
+                sys.exit(1)
+            except (urllib.error.URLError, socket.timeout) as exc:
+                exc_str = str(exc)
+                if isinstance(exc, socket.timeout) or "timed out" in exc_str.lower():
+                    _write_failure(
+                        task_dir,
+                        f"ollama HTTP call failed: timeout after {timeout}s",
+                        exc_str,
+                    )
+                else:
+                    _write_failure(
+                        task_dir,
+                        f"ollama HTTP call failed: connection error: {exc_str}",
+                        exc_str,
+                    )
+                print(f"[ollama-wrapper] wrote failure result.json (url error: {exc})", flush=True)
+                sys.exit(1)
+            except json.JSONDecodeError as exc:
+                _write_failure(
+                    task_dir,
+                    "ollama HTTP call failed: invalid JSON response",
+                    str(exc),
+                )
+                print(f"[ollama-wrapper] wrote failure result.json (json decode error: {exc})", flush=True)
+                sys.exit(1)
+            except Exception as exc:
+                _write_failure(
+                    task_dir,
+                    f"ollama HTTP call failed: {exc}",
+                    str(exc),
+                )
+                print(f"[ollama-wrapper] wrote failure result.json (error: {exc})", flush=True)
                 sys.exit(1)
 
             duration = time.time() - started
