@@ -91,7 +91,10 @@ def _list_proposed_tasks(mas_root: Path) -> list[str]:
     for task_json in sorted((mas_root / "tasks" / "proposed").glob("*/task.json")):
         try:
             data = json.loads(task_json.read_text())
-            goal = data.get("goal") or data.get("summary") or task_json.parent.name
+            known = Task.model_fields.keys()
+            data = {k: v for k, v in data.items() if k in known}
+            task = Task.model_validate(data)
+            goal = task.goal or task_json.parent.name
             proposed.append(goal)
         except Exception:
             proposed.append(task_json.parent.name)

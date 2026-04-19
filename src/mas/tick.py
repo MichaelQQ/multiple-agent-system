@@ -16,7 +16,7 @@ from .adapters import get_adapter
 from .config import load_config, project_root, project_dir
 from .ids import task_id as new_task_id
 from .roles import gather_proposer_signals, parse_plan, render_prompt
-from .schemas import MasConfig, Plan, Result, Role, Task
+from .schemas import MasConfig, Plan, ProposalHandoff, Result, Role, Task
 
 log = logging.getLogger("mas.tick")
 
@@ -364,8 +364,17 @@ def _materialize_proposal(env: TickEnv, result: Result) -> None:
     Agentic providers can write the task.json themselves; non-agentic ones
     (Ollama) only emit result.json, so the tick loop materializes the card
     from handoff."""
-    handoff = result.handoff or {}
-    goal = handoff.get("goal") or result.summary
+    handoff_raw = result.handoff or {}
+    try:
+        handoff = ProposalHandoff.model_validate(handoff_raw)
+    except Exception:
+        handoff = None
+
+    if handoff is None:
+        goal = handoff_raw.get("goal") or result.summary
+    else:
+        goal = handoff.goal or result.summary
+
     if not goal:
         log.warning("proposer %s: no goal in handoff, skipping materialization", result.task_id)
         return
@@ -373,11 +382,20 @@ def _materialize_proposal(env: TickEnv, result: Result) -> None:
         return
 
     inputs: dict = {}
-    if handoff.get("rationale"):
-        inputs["rationale"] = handoff["rationale"]
-    for key in ("acceptance", "suggested_changes"):
-        if handoff.get(key):
-            inputs[key] = handoff[key]
+    if handoff is not None and handoff.rationale:
+        inputs["rationale"] = handoff.rationale
+    elif handoff is None and handoff_raw.get("rationale"):
+        inputs["rationale"] = handoff_raw["rationale"]
+
+    if handoff is not None:
+        if handoff.acceptance:
+            inputs["acceptance"] = handoff.acceptance
+        if handoff.suggested_changes:
+            inputs["suggested_changes"] = handoff.suggested_changes
+    else:
+        for key in ("acceptance", "suggested_changes"):
+            if handoff_raw.get(key):
+                inputs[key] = handoff_raw[key]
 
     tid = new_task_id(goal)
     target = env.mas / "tasks" / "proposed" / tid

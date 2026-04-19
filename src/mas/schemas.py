@@ -3,11 +3,15 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Literal
 
+import re
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 Role = Literal["proposer", "orchestrator", "implementer", "tester", "evaluator"]
 Status = Literal["success", "failure", "needs_revision"]
 Verdict = Literal["pass", "fail", "needs_revision"]
+
+_TASK_ID_PATTERN = re.compile(r"^\d{8}-[a-zA-Z0-9_-]+-[a-f0-9]{4}$")
 
 
 def _now() -> datetime:
@@ -28,6 +32,13 @@ class Task(BaseModel):
     attempt: int = 1
     created_at: datetime = Field(default_factory=_now)
 
+    @field_validator("id")
+    @classmethod
+    def _validate_task_id(cls, v: str) -> str:
+        if not _TASK_ID_PATTERN.match(v):
+            raise ValueError(f"Task.id must match pattern {{yyyymmdd}}-{{slug}}-{{hash4}}, got: {v}")
+        return v
+
 
 class Result(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -43,6 +54,22 @@ class Result(BaseModel):
     tokens_out: int | None = None
     duration_s: float | None = None
     cost_usd: float | None = None
+
+    @field_validator("duration_s")
+    @classmethod
+    def _validate_duration_s(cls, v: float | None) -> float | None:
+        if v is not None and v < 0:
+            raise ValueError("duration_s must be non-negative")
+        return v
+
+
+class ProposalHandoff(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    goal: str
+    rationale: str | None = None
+    acceptance: str | None = None
+    suggested_changes: list[str] | None = None
 
 
 class SubtaskSpec(BaseModel):
