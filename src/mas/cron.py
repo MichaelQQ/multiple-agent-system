@@ -10,9 +10,11 @@ MARK_END = "# <<< mas-cron {id} <<<"
 
 
 def _get_crontab() -> str:
-    r = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+    try:
+        r = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+    except subprocess.CalledProcessError:
+        return ""
     if r.returncode != 0 and "no crontab" not in (r.stderr or "").lower():
-        # empty crontab is fine; unknown errors bubble up
         return ""
     return r.stdout or ""
 
