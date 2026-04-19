@@ -43,6 +43,8 @@ def create(repo: Path, task_id: str, worktree_path: Path) -> Path:
 
     worktree_path.parent.mkdir(parents=True, exist_ok=True)
 
+    _git(repo, "worktree", "prune", check=False)
+
     if _branch_exists(repo, branch):
         _git(repo, "worktree", "add", str(worktree_path), branch)
     else:
