@@ -79,10 +79,7 @@ def write_task(dir_: Path, task: Task) -> Path:
 
 def read_task(dir_: Path) -> Task:
     p = dir_ / "task.json"
-    data = json.loads(p.read_text())
-    known = Task.model_fields.keys()
-    data = {k: v for k, v in data.items() if k in known}
-    return Task.model_validate(data)
+    return Task.model_validate_json(p.read_text())
 
 
 def read_result(dir_: Path):
@@ -92,6 +89,13 @@ def read_result(dir_: Path):
     if not p.exists():
         return None
     return Result.model_validate_json(p.read_text())
+
+
+def read_plan(dir_: Path):
+    from .schemas import Plan
+
+    p = dir_ / "plan.json"
+    return Plan.model_validate_json(p.read_text())
 
 
 def count_active_pids(mas_dir: Path, provider: str | None = None) -> int:

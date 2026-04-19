@@ -10,6 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `MAS_OLLAMA_TIMEOUT` environment variable (default: 3600s) for controlling HTTP request timeout to the Ollama API.
+- `ProposalHandoff` model in `src/mas/schemas.py` for typed proposer handoffs
+- `board.read_plan()` helper to read and validate `plan.json` files
+- `Task.id` field validation against pattern `{yyyymmdd}-{slug}-{hash4}`
+- `Result.duration_s` validator rejecting negative values
+
+### Changed
+
+- `board.read_task()` now uses `model_validate_json()` (strict validation)
+- All schemas use `extra="forbid"` to reject unknown fields
 
 ### Fixed
 
@@ -19,3 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - HTTP errors (4xx/5xx responses) produce "HTTP {code}: {reason}" message
   - JSON decode errors produce "invalid JSON response" message
 - Failure result objects now properly populate all required schema fields (`task_id`, `status`, `summary`, `artifacts`, `handoff`, `verdict`, `feedback`, `tokens_in`, `tokens_out`, `duration_s`, `cost_usd`).
+
+### Breaking Changes
+
+- **Unknown fields in JSON files cause validation errors.** Manually-crafted
+  `task.json`, `result.json`, `plan.json`, or `config.yaml` files with
+  extra fields will fail to load. Remove unknown fields before loading.

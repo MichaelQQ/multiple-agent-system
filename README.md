@@ -110,6 +110,17 @@ Agents communicate via JSON files, never prose. Each worker reads `task.json`
 from its own directory and writes `result.json` before exiting. Stdout is
 logs only. Schemas live in `src/mas/schemas.py`.
 
+### Schema validation
+
+All models use `extra="forbid"` — unknown fields in `task.json`,
+`result.json`, `plan.json`, or `config.yaml` cause validation errors.
+The `board.read_task()` and `board.read_plan()` helpers parse with
+`model_validate_json()` to enforce this.
+
+- `Task.id` validates against pattern `{yyyymmdd}-{slug}-{hash4}`
+- `Result.duration_s` must be non-negative
+- `ProposalHandoff` model for proposer handoffs
+
 ## Failure handling
 
 - Per-role `max_retries` (default 2) with the previous failure summary
