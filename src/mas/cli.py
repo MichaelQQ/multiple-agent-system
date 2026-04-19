@@ -4,6 +4,7 @@ import logging
 import shutil
 import subprocess
 import sys
+from datetime import datetime
 from importlib import resources
 from pathlib import Path
 
@@ -34,6 +35,15 @@ def _templates_dir() -> Path:
         pass
     # Fall back to source layout.
     return Path(__file__).resolve().parents[2] / "templates"
+
+
+def _fmt_local_time(ts: str) -> str:
+    """Render a UTC ISO timestamp as local HH:MM:SS for the show table."""
+    try:
+        dt = datetime.fromisoformat(ts)
+    except ValueError:
+        return ts[11:19]
+    return dt.astimezone().strftime("%H:%M:%S")
 
 
 @app.command()
@@ -124,7 +134,7 @@ def show() -> None:
                 goal = "?"
             txns = transitions.read_transitions(d, limit=5)
             txn_str = "\n".join(
-                f"{x.timestamp[11:19]} {x.from_state}→{x.to_state} ({x.reason})"
+                f"{_fmt_local_time(x.timestamp)} {x.from_state}→{x.to_state} ({x.reason})"
                 for x in txns
             ) if txns else ""
             table.add_row(col, d.name, t.role if t else "?", goal, txn_str)
