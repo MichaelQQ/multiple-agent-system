@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `board.read_plan()` helper to read and validate `plan.json` files
 - `Task.id` field validation against pattern `{yyyymmdd}-{slug}-{hash4}`
 - `Result.duration_s` validator rejecting negative values
+- Added a formal testing strategy document (`TESTING_STRATEGY.md`) defining test layers
+  (Unit/Integration/E2E), component mapping, mocking guidance, and organization conventions.
 
 ### Changed
 

@@ -151,6 +151,10 @@ rendered with `string.Template.safe_substitute` before dispatch.
 Unit tests cover schemas, board moves, PID counter, previous-failure
 injection, id generator.
 
+See [TESTING_STRATEGY.md](TESTING_STRATEGY.md) for the full testing approach,
+including test layers (Unit/Integration/E2E), component mapping, and mocking
+guidance.
+
 ## Scope of v1
 
 Implemented: init, tick, show, promote, retry, logs, cron install/uninstall/
