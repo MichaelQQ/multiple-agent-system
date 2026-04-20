@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from mas.errors import PlanParseError, ResultReadError, TaskReadError
 from mas.schemas import Plan, Result, SubtaskSpec, Task
 
 
@@ -37,7 +38,7 @@ class TestBoardValidation:
         }
         (task_dir / "task.json").write_text(json.dumps(task_json))
 
-        with pytest.raises(ValidationError):
+        with pytest.raises(TaskReadError):
             board.read_task(task_dir)
 
     def test_read_result_rejects_malformed_json(self, tmp_path):
@@ -48,7 +49,7 @@ class TestBoardValidation:
         task_dir.mkdir()
         (task_dir / "result.json").write_text("{ invalid json }")
 
-        with pytest.raises(ValidationError):
+        with pytest.raises(ResultReadError):
             board.read_result(task_dir)
 
     def test_read_plan_returns_typed_plan(self, tmp_path):
@@ -131,7 +132,7 @@ class TestRolesValidation:
         }
         plan_path.write_text(json.dumps(invalid_plan))
 
-        with pytest.raises(ValidationError):
+        with pytest.raises(PlanParseError):
             roles.parse_plan(plan_path, "20260415-parent-1234")
 
 

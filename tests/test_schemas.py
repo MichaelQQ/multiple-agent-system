@@ -2,7 +2,7 @@ from mas.schemas import Plan, Result, SubtaskSpec, Task
 
 
 def test_task_roundtrip():
-    t = Task(id="abc", role="implementer", goal="do the thing")
+    t = Task(id="20260415-abc-aaaa", role="implementer", goal="do the thing")
     data = t.model_dump_json()
     t2 = Task.model_validate_json(data)
     assert t2 == t

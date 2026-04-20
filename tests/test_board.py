@@ -20,14 +20,14 @@ def test_ensure_layout(mas: Path):
 
 
 def test_move_task_between_columns(mas: Path):
-    src = board.task_dir(mas, "proposed", "t1")
+    src = board.task_dir(mas, "proposed", "20260415-t1-aaaa")
     src.mkdir(parents=True)
-    board.write_task(src, Task(id="t1", role="proposer", goal="g"))
-    dst = board.task_dir(mas, "doing", "t1")
+    board.write_task(src, Task(id="20260415-t1-aaaa", role="proposer", goal="g"))
+    dst = board.task_dir(mas, "doing", "20260415-t1-aaaa")
     board.move(src, dst)
     assert not src.exists()
     assert (dst / "task.json").exists()
-    assert board.read_task(dst).id == "t1"
+    assert board.read_task(dst).id == "20260415-t1-aaaa"
 
 
 def test_count_active_pids_clears_dead(mas: Path):

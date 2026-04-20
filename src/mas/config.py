@@ -44,20 +44,27 @@ def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]
 def _load_yaml(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
-    try:
-        with path.open() as f:
-            return yaml.safe_load(f) or {}
-    except yaml.YAMLError as e:
-        log.warning("invalid YAML in %s: %s", path, e)
-        return {}
+    with path.open() as f:
+        return yaml.safe_load(f) or {}
 
 
 def load_config(project: Path | None = None) -> MasConfig:
     proj = project or project_dir()
-    user_cfg = _load_yaml(USER_CONFIG_DIR / "config.yaml")
-    user_roles = _load_yaml(USER_CONFIG_DIR / "roles.yaml")
-    proj_cfg = _load_yaml(proj / "config.yaml")
-    proj_roles = _load_yaml(proj / "roles.yaml")
+    yaml_failed = False
+
+    def _safe(path: Path) -> dict[str, Any]:
+        nonlocal yaml_failed
+        try:
+            return _load_yaml(path)
+        except yaml.YAMLError as e:
+            log.warning("invalid YAML in %s: %s", path, e)
+            yaml_failed = True
+            return {}
+
+    user_cfg = _safe(USER_CONFIG_DIR / "config.yaml")
+    user_roles = _safe(USER_CONFIG_DIR / "roles.yaml")
+    proj_cfg = _safe(proj / "config.yaml")
+    proj_roles = _safe(proj / "roles.yaml")
 
     merged: dict[str, Any] = {}
     merged = _deep_merge(merged, user_cfg)
@@ -75,21 +82,13 @@ def load_config(project: Path | None = None) -> MasConfig:
         merged["roles"] = roles.get("roles", roles)
     log.debug("config loaded", extra={"path": str(proj / "config.yaml")})
 
-    from .schemas import ProviderConfig, RoleConfig
-
     try:
         config = MasConfig.model_validate(merged)
     except (PydanticValidationError, PydanticCoreValidationError) as e:
-        log.warning("config validation failed: %s", e)
-        config = MasConfig(
-            providers={
-                name: ProviderConfig(cli="unknown", max_concurrent=1, extra_args=[])
-                for name in ["claude-code", "opencode"]
-            },
-            roles={},
-            proposer_signals={},
-            max_proposed=merged.get("max_proposed", 10),
-        )
+        if yaml_failed:
+            config = MasConfig(providers={}, roles={}, proposer_signals={}, max_proposed=10)
+        else:
+            raise ConfigValidationError.from_pydantic(e) from e
 
     _validate_cross_field_constraints(config)
 

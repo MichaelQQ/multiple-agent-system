@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
+from mas.errors import PlanParseError
 from mas.roles import (
     _list_proposed_tasks,
     _run,
@@ -44,69 +45,69 @@ Unmatched: $unmatched_var
         return p
 
     def test_proposer_role(self, template_file):
-        task = Task(id="t1", role="proposer", goal="suggest work")
+        task = Task(id="20260415-t1-aaaa", role="proposer", goal="suggest work")
         result = render_prompt(template_file, task)
         assert "Role: proposer" in result
-        assert "Task ID: t1" in result
+        assert "Task ID: 20260415-t1-aaaa" in result
         assert "Cycle: 0" in result
         assert "Attempt: 1" in result
 
     def test_orchestrator_role(self, template_file):
-        task = Task(id="t2", role="orchestrator", goal="plan tasks")
+        task = Task(id="20260415-t2-aaaa", role="orchestrator", goal="plan tasks")
         result = render_prompt(template_file, task)
         assert "Role: orchestrator" in result
 
     def test_implementer_role(self, template_file):
-        task = Task(id="t3", role="implementer", goal="write code")
+        task = Task(id="20260415-t3-aaaa", role="implementer", goal="write code")
         result = render_prompt(template_file, task)
         assert "Role: implementer" in result
 
     def test_tester_role(self, template_file):
-        task = Task(id="t4", role="tester", goal="verify code")
+        task = Task(id="20260415-t4-aaaa", role="tester", goal="verify code")
         result = render_prompt(template_file, task)
         assert "Role: tester" in result
 
     def test_evaluator_role(self, template_file):
-        task = Task(id="t5", role="evaluator", goal="judge results")
+        task = Task(id="20260415-t5-aaaa", role="evaluator", goal="judge results")
         result = render_prompt(template_file, task)
         assert "Role: evaluator" in result
 
     def test_safe_substitute_leaves_unmatched(self, template_file):
         """safe_substitute should leave unmatched $var patterns intact, not raise."""
-        task = Task(id="t1", role="proposer", goal="g")
+        task = Task(id="20260415-t1-aaaa", role="proposer", goal="g")
         result = render_prompt(template_file, task)
         assert "$unmatched_var" in result
 
     def test_extra_kwargs_substituted(self, template_file):
-        task = Task(id="t1", role="proposer", goal="g")
+        task = Task(id="20260415-t1-aaaa", role="proposer", goal="g")
         result = render_prompt(template_file, task, extra_field="custom_value")
         assert "Extra field: custom_value" in result
 
     def test_cycle_is_stringified(self, template_file):
-        task = Task(id="t1", role="proposer", goal="g", cycle=3)
+        task = Task(id="20260415-t1-aaaa", role="proposer", goal="g", cycle=3)
         result = render_prompt(template_file, task)
         assert "Cycle: 3" in result
 
     def test_attempt_is_stringified(self, template_file):
-        task = Task(id="t1", role="proposer", goal="g", attempt=5)
+        task = Task(id="20260415-t1-aaaa", role="proposer", goal="g", attempt=5)
         result = render_prompt(template_file, task)
         assert "Attempt: 5" in result
 
     def test_empty_parent_id(self, template_file):
         """parent_id=None should result in empty string."""
-        task = Task(id="t1", role="proposer", goal="g", parent_id=None)
+        task = Task(id="20260415-t1-aaaa", role="proposer", goal="g", parent_id=None)
         result = render_prompt(template_file, task)
         assert "Parent ID: []" in result
 
     def test_empty_previous_failure(self, template_file):
         """previous_failure=None should result in empty string."""
-        task = Task(id="t1", role="proposer", goal="g", previous_failure=None)
+        task = Task(id="20260415-t1-aaaa", role="proposer", goal="g", previous_failure=None)
         result = render_prompt(template_file, task)
         assert "Previous Failure: []" in result
 
     def test_prior_results_serialized(self, template_file):
         task = Task(
-            id="t1",
+            id="20260415-t1-aaaa",
             role="proposer",
             goal="g",
             prior_results=[
@@ -120,7 +121,7 @@ Unmatched: $unmatched_var
 
     def test_inputs_serialized(self, template_file):
         task = Task(
-            id="t1",
+            id="20260415-t1-aaaa",
             role="proposer",
             goal="g",
             inputs={"target_module": "src/foo.py"},
@@ -131,7 +132,7 @@ Unmatched: $unmatched_var
 
     def test_constraints_serialized(self, template_file):
         task = Task(
-            id="t1",
+            id="20260415-t1-aaaa",
             role="proposer",
             goal="g",
             constraints={"tests_only": True},
@@ -141,7 +142,7 @@ Unmatched: $unmatched_var
         assert "tests_only" in result
 
     def test_result_schema_included(self, template_file):
-        task = Task(id="t1", role="proposer", goal="g")
+        task = Task(id="20260415-t1-aaaa", role="proposer", goal="g")
         result = render_prompt(template_file, task)
         assert "Result Schema:" in result
         assert "task_id" in result
@@ -381,17 +382,17 @@ class TestParsePlan:
 
     def test_malformed_json(self, plan_file):
         plan_file.write_text("{invalid json")
-        with pytest.raises(json.JSONDecodeError):
+        with pytest.raises(PlanParseError):
             parse_plan(plan_file, "parent")
 
     def test_truncated_json(self, plan_file):
         plan_file.write_text('{"parent_id": "p"')
-        with pytest.raises(json.JSONDecodeError):
+        with pytest.raises(PlanParseError):
             parse_plan(plan_file, "parent")
 
     def test_missing_required_fields(self, plan_file):
         plan_file.write_text('{"parent_id": "p"}')
-        with pytest.raises(ValueError):
+        with pytest.raises(PlanParseError):
             parse_plan(plan_file, "p")
 
     def test_extra_fields_rejected(self, plan_file):
@@ -402,7 +403,7 @@ class TestParsePlan:
             "extra_field": "not allowed",
         }
         plan_file.write_text(json.dumps(data))
-        with pytest.raises(ValueError):
+        with pytest.raises(PlanParseError):
             parse_plan(plan_file, "p")
 
 

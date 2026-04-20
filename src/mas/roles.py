@@ -101,13 +101,11 @@ def _list_proposed_tasks(mas_root: Path) -> list[str]:
     for task_json in sorted((mas_root / "tasks" / "proposed").glob("*/task.json")):
         try:
             data = json.loads(task_json.read_text())
-            known = Task.model_fields.keys()
-            data = {k: v for k, v in data.items() if k in known}
-            task = Task.model_validate(data)
-            goal = task.goal or task_json.parent.name
-            proposed.append(goal)
         except Exception:
             proposed.append(task_json.parent.name)
+            continue
+        label = data.get("goal") or data.get("summary") or task_json.parent.name
+        proposed.append(label)
     return proposed
 
 
@@ -190,9 +188,6 @@ def parse_plan(plan_path: Path, parent_id: str) -> Plan:
         )
 
     data.setdefault("parent_id", parent_id)
-
-    known_fields = set(Plan.model_fields.keys())
-    data = {k: v for k, v in data.items() if k in known_fields}
 
     try:
         return Plan.model_validate(data)

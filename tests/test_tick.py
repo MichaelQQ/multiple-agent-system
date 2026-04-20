@@ -94,7 +94,7 @@ def test_advance_doing_iterates_all_doing(tmp_path: Path):
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
 
-    for tid in ["t1", "t2"]:
+    for tid in ["20260415-t1-aaaa", "20260415-t2-aaaa"]:
         p = board.task_dir(mas, "doing", tid)
         p.mkdir(parents=True)
         board.write_task(p, Task(id=tid, role="orchestrator", goal="g"))
@@ -105,8 +105,8 @@ def test_advance_doing_iterates_all_doing(tmp_path: Path):
     with patch("mas.tick._advance_one", side_effect=[RuntimeError("boom"), None]):
         _advance_doing(env)
 
-    assert (mas / "tasks" / "doing" / "t1").exists()
-    assert (mas / "tasks" / "doing" / "t2").exists()
+    assert (mas / "tasks" / "doing" / "20260415-t1-aaaa").exists()
+    assert (mas / "tasks" / "doing" / "20260415-t2-aaaa").exists()
 
 
 def test_advance_doing_catches_exception_per_task(tmp_path: Path, caplog):
@@ -114,7 +114,7 @@ def test_advance_doing_catches_exception_per_task(tmp_path: Path, caplog):
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
 
-    for tid in ["e1", "e2", "e3"]:
+    for tid in ["20260415-e1-aaaa", "20260415-e2-aaaa", "20260415-e3-aaaa"]:
         d = board.task_dir(mas, "doing", tid)
         d.mkdir(parents=True)
         board.write_task(d, Task(id=tid, role="orchestrator", goal="g"))
@@ -136,9 +136,9 @@ def test_proposer_no_result_no_log_dispatches(tmp_path: Path):
     """Never-dispatched proposer is dispatched."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = board.task_dir(mas, "doing", "prop-1")
+    parent = board.task_dir(mas, "doing", "20260415-prop-1-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="prop-1", role="proposer", goal="propose"))
+    board.write_task(parent, Task(id="20260415-prop-1-aaaa", role="proposer", goal="propose"))
 
     env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg())
 
@@ -158,12 +158,12 @@ def test_proposer_success_moves_to_done(tmp_path: Path):
     """Successful proposer result → done column + materialize."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = board.task_dir(mas, "doing", "prop-2")
+    parent = board.task_dir(mas, "doing", "20260415-prop-2-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="prop-2", role="proposer", goal="propose"))
+    board.write_task(parent, Task(id="20260415-prop-2-aaaa", role="proposer", goal="propose"))
     (parent / "logs").mkdir()
     (parent / "logs" / "proposer-1.log").write_text("ok")
-    result = Result(task_id="prop-2", status="success", summary="proposed something")
+    result = Result(task_id="20260415-prop-2-aaaa", status="success", summary="proposed something")
     (parent / "result.json").write_text(result.model_dump_json())
 
     env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg())
@@ -171,19 +171,19 @@ def test_proposer_success_moves_to_done(tmp_path: Path):
     _advance_one(env, parent)
 
     assert not parent.exists()
-    assert (mas / "tasks" / "done" / "prop-2").exists()
+    assert (mas / "tasks" / "done" / "20260415-prop-2-aaaa").exists()
 
 
 def test_proposer_failure_moves_to_failed(tmp_path: Path):
     """Failed proposer result → failed column."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = board.task_dir(mas, "doing", "prop-3")
+    parent = board.task_dir(mas, "doing", "20260415-prop-3-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="prop-3", role="proposer", goal="propose"))
+    board.write_task(parent, Task(id="20260415-prop-3-aaaa", role="proposer", goal="propose"))
     (parent / "logs").mkdir()
     (parent / "logs" / "proposer-1.log").write_text("err")
-    result = Result(task_id="prop-3", status="failure", summary="failed")
+    result = Result(task_id="20260415-prop-3-aaaa", status="failure", summary="failed")
     (parent / "result.json").write_text(result.model_dump_json())
 
     env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg())
@@ -191,16 +191,16 @@ def test_proposer_failure_moves_to_failed(tmp_path: Path):
     _advance_one(env, parent)
 
     assert not parent.exists()
-    assert (mas / "tasks" / "failed" / "prop-3").exists()
+    assert (mas / "tasks" / "failed" / "20260415-prop-3-aaaa").exists()
 
 
 def test_proposer_orphan_moves_to_failed(tmp_path: Path):
     """Orphaned proposer (log exists, no pid, no result) → failed."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = board.task_dir(mas, "doing", "prop-4")
+    parent = board.task_dir(mas, "doing", "20260415-prop-4-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="prop-4", role="proposer", goal="propose"))
+    board.write_task(parent, Task(id="20260415-prop-4-aaaa", role="proposer", goal="propose"))
     (parent / "logs").mkdir()
     (parent / "logs" / "proposer-1.log").write_text("crash")
 
@@ -210,7 +210,7 @@ def test_proposer_orphan_moves_to_failed(tmp_path: Path):
         _advance_one(env, parent)
 
     assert not parent.exists()
-    assert (mas / "tasks" / "failed" / "prop-4").exists()
+    assert (mas / "tasks" / "failed" / "20260415-prop-4-aaaa").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -221,9 +221,9 @@ def test_orchestrator_creates_worktree(tmp_path: Path):
     """Missing worktree dir triggers worktree.create."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = board.task_dir(mas, "doing", "orch-1")
+    parent = board.task_dir(mas, "doing", "20260415-orch-1-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="orch-1", role="orchestrator", goal="g"))
+    board.write_task(parent, Task(id="20260415-orch-1-aaaa", role="orchestrator", goal="g"))
     assert not (parent / "worktree").exists()
 
     env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg())
@@ -245,9 +245,9 @@ def test_orchestrator_no_plan_no_result_dispatches(tmp_path: Path):
     """Orchestrator with no plan.json and no result → dispatch."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = board.task_dir(mas, "doing", "orch-2")
+    parent = board.task_dir(mas, "doing", "20260415-orch-2-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="orch-2", role="orchestrator", goal="g"))
+    board.write_task(parent, Task(id="20260415-orch-2-aaaa", role="orchestrator", goal="g"))
     (parent / "worktree").mkdir()
     assert not (parent / "plan.json").exists()
 
@@ -270,15 +270,15 @@ def test_orchestrator_materializes_plan_from_handoff(tmp_path: Path):
     """Orchestrator result with handoff → plan.json written."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = board.task_dir(mas, "doing", "orch-3")
+    parent = board.task_dir(mas, "doing", "20260415-orch-3-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="orch-3", role="orchestrator", goal="g"))
+    board.write_task(parent, Task(id="20260415-orch-3-aaaa", role="orchestrator", goal="g"))
     (parent / "worktree").mkdir()
     result = Result(
-        task_id="orch-3",
+        task_id="20260415-orch-3-aaaa",
         status="success",
         summary="plan created",
-        handoff={"parent_id": "orch-3", "summary": "s", "subtasks": []},
+        handoff={"parent_id": "20260415-orch-3-aaaa", "summary": "s", "subtasks": []},
     )
     (parent / "result.json").write_text(result.model_dump_json())
 
@@ -293,9 +293,9 @@ def test_orchestrator_orphan_retries(tmp_path: Path):
     """Orphaned orchestrator bumps attempt and keeps parent in doing/."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = board.task_dir(mas, "doing", "orch-4")
+    parent = board.task_dir(mas, "doing", "20260415-orch-4-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="orch-4", role="orchestrator", goal="g"))
+    board.write_task(parent, Task(id="20260415-orch-4-aaaa", role="orchestrator", goal="g"))
     (parent / "worktree").mkdir()
     (parent / "logs").mkdir()
     (parent / "logs" / "orchestrator-1.log").write_text("crash\n")
@@ -320,9 +320,9 @@ def test_orchestrator_max_retries_fails(tmp_path: Path):
     """
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = board.task_dir(mas, "doing", "orch-5")
+    parent = board.task_dir(mas, "doing", "20260415-orch-5-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="orch-5", role="orchestrator", goal="g"))
+    board.write_task(parent, Task(id="20260415-orch-5-aaaa", role="orchestrator", goal="g"))
     (parent / "worktree").mkdir()
     (parent / "logs").mkdir()
     (parent / "logs" / "orchestrator-1.log").write_text("crash\n")
@@ -345,7 +345,7 @@ def test_orchestrator_max_retries_fails(tmp_path: Path):
         _advance_one(env, parent)
 
     assert not parent.exists()
-    assert (mas / "tasks" / "failed" / "orch-5").exists()
+    assert (mas / "tasks" / "failed" / "20260415-orch-5-aaaa").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -356,13 +356,13 @@ def test_next_ready_child_skips_successful(tmp_path: Path):
     """_next_ready_child returns None when all subtasks succeeded."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = _seed_parent_with_plan(mas, "p-1", "impl-1")
+    parent = _seed_parent_with_plan(mas, "20260415-p-1-aaaa", "20260415-impl-1-aaaa")
     subtasks = parent / "subtasks"
-    child = subtasks / "impl-1"
-    r = Result(task_id="impl-1", status="success", summary="done")
+    child = subtasks / "20260415-impl-1-aaaa"
+    r = Result(task_id="20260415-impl-1-aaaa", status="success", summary="done")
     (child / "result.json").write_text(r.model_dump_json())
 
-    plan = parse_plan(parent / "plan.json", "p-1")
+    plan = parse_plan(parent / "plan.json", "20260415-p-1-aaaa")
     result = _next_ready_child(plan, subtasks)
     assert result is None
 
@@ -371,41 +371,41 @@ def test_next_ready_child_returns_failed(tmp_path: Path):
     """_next_ready_child returns first non-successful child."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = board.task_dir(mas, "doing", "p-2")
+    parent = board.task_dir(mas, "doing", "20260415-p-2-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="p-2", role="orchestrator", goal="g"))
+    board.write_task(parent, Task(id="20260415-p-2-aaaa", role="orchestrator", goal="g"))
     subtasks = parent / "subtasks"
     subtasks.mkdir()
 
     plan = Plan(
-        parent_id="p-2",
+        parent_id="20260415-p-2-aaaa",
         summary="s",
         subtasks=[
-            SubtaskSpec(id="impl-1", role="implementer", goal="do"),
-            SubtaskSpec(id="impl-2", role="implementer", goal="do2"),
+            SubtaskSpec(id="20260415-impl-1-aaaa", role="implementer", goal="do"),
+            SubtaskSpec(id="20260415-impl-2-aaaa", role="implementer", goal="do2"),
         ],
     )
     (parent / "plan.json").write_text(plan.model_dump_json())
 
-    child1 = subtasks / "impl-1"
+    child1 = subtasks / "20260415-impl-1-aaaa"
     child1.mkdir()
-    r1 = Result(task_id="impl-1", status="success", summary="done")
+    r1 = Result(task_id="20260415-impl-1-aaaa", status="success", summary="done")
     (child1 / "result.json").write_text(r1.model_dump_json())
 
-    child2 = subtasks / "impl-2"
+    child2 = subtasks / "20260415-impl-2-aaaa"
     child2.mkdir()
 
     result = _next_ready_child(plan, subtasks)
     assert result is not None
-    assert result.id == "impl-2"
+    assert result.id == "20260415-impl-2-aaaa"
 
 
 def test_first_dispatch_creates_task_json(tmp_path: Path):
     """First dispatch for a child creates task.json."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = _seed_parent_with_plan(mas, "p-3", "impl-1")
-    child = parent / "subtasks" / "impl-1"
+    parent = _seed_parent_with_plan(mas, "20260415-p-3-aaaa", "20260415-impl-1-aaaa")
+    child = parent / "subtasks" / "20260415-impl-1-aaaa"
 
     env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg())
 
@@ -425,8 +425,8 @@ def test_skip_dispatch_if_role_already_running(tmp_path: Path):
     """If role is already running (live pid), no new dispatch occurs."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = _seed_parent_with_plan(mas, "p-4", "impl-1")
-    child = parent / "subtasks" / "impl-1"
+    parent = _seed_parent_with_plan(mas, "20260415-p-4-aaaa", "20260415-impl-1-aaaa")
+    child = parent / "subtasks" / "20260415-impl-1-aaaa"
     (child / "pids").mkdir()
     (child / "pids" / "implementer.0.pid").write_text("99999")
 
@@ -449,72 +449,72 @@ def test_collect_prior_results_returns_preceding_siblings(tmp_path: Path):
     """Only subtasks before current_id with a result.json are returned, in plan order."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = board.task_dir(mas, "doing", "p-pr1")
+    parent = board.task_dir(mas, "doing", "20260415-p-pr1-aaaa")
     parent.mkdir(parents=True)
     subtasks = parent / "subtasks"
     subtasks.mkdir()
     plan = Plan(
-        parent_id="p-pr1", summary="s",
+        parent_id="20260415-p-pr1-aaaa", summary="s",
         subtasks=[
-            SubtaskSpec(id="test-1", role="tester", goal="t"),
-            SubtaskSpec(id="impl-1", role="implementer", goal="i"),
-            SubtaskSpec(id="eval-1", role="evaluator", goal="e"),
+            SubtaskSpec(id="20260415-test-1-aaaa", role="tester", goal="t"),
+            SubtaskSpec(id="20260415-impl-1-aaaa", role="implementer", goal="i"),
+            SubtaskSpec(id="20260415-eval-1-aaaa", role="evaluator", goal="e"),
         ],
     )
-    d = subtasks / "test-1"
+    d = subtasks / "20260415-test-1-aaaa"
     d.mkdir()
     (d / "result.json").write_text(
-        Result(task_id="test-1", status="success", summary="tests written",
+        Result(task_id="20260415-test-1-aaaa", status="success", summary="tests written",
                handoff={"test_command": "pytest tests/new.py", "test_files": ["tests/new.py"]}
                ).model_dump_json()
     )
 
-    priors = _collect_prior_results(plan, "impl-1", subtasks)
-    assert [r.task_id for r in priors] == ["test-1"]
+    priors = _collect_prior_results(plan, "20260415-impl-1-aaaa", subtasks)
+    assert [r.task_id for r in priors] == ["20260415-test-1-aaaa"]
     assert priors[0].handoff["test_command"] == "pytest tests/new.py"
 
 
 def test_collect_prior_results_empty_for_first_subtask(tmp_path: Path):
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = board.task_dir(mas, "doing", "p-pr2")
+    parent = board.task_dir(mas, "doing", "20260415-p-pr2-aaaa")
     parent.mkdir(parents=True)
     subtasks = parent / "subtasks"
     subtasks.mkdir()
     plan = Plan(
-        parent_id="p-pr2", summary="s",
-        subtasks=[SubtaskSpec(id="test-1", role="tester", goal="t")],
+        parent_id="20260415-p-pr2-aaaa", summary="s",
+        subtasks=[SubtaskSpec(id="20260415-test-1-aaaa", role="tester", goal="t")],
     )
 
-    assert _collect_prior_results(plan, "test-1", subtasks) == []
+    assert _collect_prior_results(plan, "20260415-test-1-aaaa", subtasks) == []
 
 
 def test_dispatch_injects_prior_results_into_task_json(tmp_path: Path):
     """When the implementer is dispatched, its task.json carries tester's result."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = board.task_dir(mas, "doing", "p-pr3")
+    parent = board.task_dir(mas, "doing", "20260415-p-pr3-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="p-pr3", role="orchestrator", goal="g"))
+    board.write_task(parent, Task(id="20260415-p-pr3-aaaa", role="orchestrator", goal="g"))
     (parent / "worktree").mkdir()
     plan = Plan(
-        parent_id="p-pr3", summary="s",
+        parent_id="20260415-p-pr3-aaaa", summary="s",
         subtasks=[
-            SubtaskSpec(id="test-1", role="tester", goal="t"),
-            SubtaskSpec(id="impl-1", role="implementer", goal="i"),
+            SubtaskSpec(id="20260415-test-1-aaaa", role="tester", goal="t"),
+            SubtaskSpec(id="20260415-impl-1-aaaa", role="implementer", goal="i"),
         ],
     )
     (parent / "plan.json").write_text(plan.model_dump_json())
     subtasks = parent / "subtasks"
-    test_dir = subtasks / "test-1"
+    test_dir = subtasks / "20260415-test-1-aaaa"
     test_dir.mkdir(parents=True)
     (test_dir / "result.json").write_text(
-        Result(task_id="test-1", status="success", summary="failing tests authored",
+        Result(task_id="20260415-test-1-aaaa", status="success", summary="failing tests authored",
                handoff={"test_command": "pytest -q", "test_files": ["tests/x.py"],
                         "initial_exit_code": 1, "expected_exit_code_after_impl": 0}
                ).model_dump_json()
     )
-    impl_dir = subtasks / "impl-1"
+    impl_dir = subtasks / "20260415-impl-1-aaaa"
     impl_dir.mkdir()
 
     env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg())
@@ -530,7 +530,7 @@ def test_dispatch_injects_prior_results_into_task_json(tmp_path: Path):
 
     impl_task = board.read_task(impl_dir)
     assert len(impl_task.prior_results) == 1
-    assert impl_task.prior_results[0].task_id == "test-1"
+    assert impl_task.prior_results[0].task_id == "20260415-test-1-aaaa"
     assert impl_task.prior_results[0].handoff["test_command"] == "pytest -q"
 
 
@@ -542,12 +542,12 @@ def test_handle_child_result_success_passthrough(tmp_path: Path):
     """Successful child result is a no-op."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = _seed_parent_with_plan(mas, "p-5", "impl-1")
-    child = parent / "subtasks" / "impl-1"
-    r = Result(task_id="impl-1", status="success", summary="ok")
+    parent = _seed_parent_with_plan(mas, "20260415-p-5-aaaa", "20260415-impl-1-aaaa")
+    child = parent / "subtasks" / "20260415-impl-1-aaaa"
+    r = Result(task_id="20260415-impl-1-aaaa", status="success", summary="ok")
     (child / "result.json").write_text(r.model_dump_json())
 
-    plan = parse_plan(parent / "plan.json", "p-5")
+    plan = parse_plan(parent / "plan.json", "20260415-p-5-aaaa")
     spec = plan.subtasks[0]
     env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg())
 
@@ -560,13 +560,13 @@ def test_handle_child_result_failure_bumps_attempt(tmp_path: Path):
     """Failed child below max_retries → bump attempt, rename result, write previous_failure."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = _seed_parent_with_plan(mas, "p-6", "impl-1")
-    child = parent / "subtasks" / "impl-1"
+    parent = _seed_parent_with_plan(mas, "20260415-p-6-aaaa", "20260415-impl-1-aaaa")
+    child = parent / "subtasks" / "20260415-impl-1-aaaa"
     (child / ".attempt").write_text("1")
-    r = Result(task_id="impl-1", status="failure", summary="oops")
+    r = Result(task_id="20260415-impl-1-aaaa", status="failure", summary="oops")
     (child / "result.json").write_text(r.model_dump_json())
 
-    plan = parse_plan(parent / "plan.json", "p-6")
+    plan = parse_plan(parent / "plan.json", "20260415-p-6-aaaa")
     spec = plan.subtasks[0]
     env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg(max_retries=2))
 
@@ -582,40 +582,40 @@ def test_handle_child_result_failure_max_retries_moves_parent(tmp_path: Path):
     """Failed child at max_retries → parent moved to failed/."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = _seed_parent_with_plan(mas, "p-7", "impl-1")
-    child = parent / "subtasks" / "impl-1"
+    parent = _seed_parent_with_plan(mas, "20260415-p-7-aaaa", "20260415-impl-1-aaaa")
+    child = parent / "subtasks" / "20260415-impl-1-aaaa"
     (child / ".attempt").write_text("3")
-    r = Result(task_id="impl-1", status="failure", summary="still failing")
+    r = Result(task_id="20260415-impl-1-aaaa", status="failure", summary="still failing")
     (child / "result.json").write_text(r.model_dump_json())
 
-    plan = parse_plan(parent / "plan.json", "p-7")
+    plan = parse_plan(parent / "plan.json", "20260415-p-7-aaaa")
     spec = plan.subtasks[0]
     env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg(max_retries=2))
 
     _handle_child_result(env, parent, board.read_task(parent), plan, spec, r)
 
     assert not parent.exists()
-    assert (mas / "tasks" / "failed" / "p-7").exists()
+    assert (mas / "tasks" / "failed" / "20260415-p-7-aaaa").exists()
 
 
 def test_handle_child_result_evaluator_needs_revision(tmp_path: Path):
     """Evaluator verdict=needs_revision → appends revision cycle subtasks."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = board.task_dir(mas, "doing", "p-8")
+    parent = board.task_dir(mas, "doing", "20260415-p-8-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="p-8", role="orchestrator", goal="g"))
+    board.write_task(parent, Task(id="20260415-p-8-aaaa", role="orchestrator", goal="g"))
     subtasks = parent / "subtasks"
     subtasks.mkdir()
     plan = Plan(
-        parent_id="p-8",
+        parent_id="20260415-p-8-aaaa",
         summary="s",
-        subtasks=[SubtaskSpec(id="eval-1", role="evaluator", goal="eval")],
+        subtasks=[SubtaskSpec(id="20260415-eval-1-aaaa", role="evaluator", goal="eval")],
     )
     (parent / "plan.json").write_text(plan.model_dump_json())
-    child = subtasks / "eval-1"
+    child = subtasks / "20260415-eval-1-aaaa"
     child.mkdir()
-    r = Result(task_id="eval-1", status="needs_revision", summary="revise",
+    r = Result(task_id="20260415-eval-1-aaaa", status="needs_revision", summary="revise",
                verdict="needs_revision", feedback="fix it")
     (child / "result.json").write_text(r.model_dump_json())
 
@@ -623,7 +623,7 @@ def test_handle_child_result_evaluator_needs_revision(tmp_path: Path):
 
     _handle_child_result(env, parent, board.read_task(parent), plan, plan.subtasks[0], r)
 
-    updated_plan = parse_plan(parent / "plan.json", "p-8")
+    updated_plan = parse_plan(parent / "plan.json", "20260415-p-8-aaaa")
     assert len(updated_plan.subtasks) == 4
     assert any(s.id == "rev-1-implementer" for s in updated_plan.subtasks)
 
@@ -636,20 +636,20 @@ def test_all_children_passed_true(tmp_path: Path):
     """All children successful → True."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = board.task_dir(mas, "doing", "p-9")
+    parent = board.task_dir(mas, "doing", "20260415-p-9-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="p-9", role="orchestrator", goal="g"))
+    board.write_task(parent, Task(id="20260415-p-9-aaaa", role="orchestrator", goal="g"))
     subtasks = parent / "subtasks"
     subtasks.mkdir()
     plan = Plan(
-        parent_id="p-9", summary="s",
+        parent_id="20260415-p-9-aaaa", summary="s",
         subtasks=[
-            SubtaskSpec(id="impl-1", role="implementer", goal="do"),
-            SubtaskSpec(id="impl-2", role="implementer", goal="do2"),
+            SubtaskSpec(id="20260415-impl-1-aaaa", role="implementer", goal="do"),
+            SubtaskSpec(id="20260415-impl-2-aaaa", role="implementer", goal="do2"),
         ],
     )
     (parent / "plan.json").write_text(plan.model_dump_json())
-    for tid in ["impl-1", "impl-2"]:
+    for tid in ["20260415-impl-1-aaaa", "20260415-impl-2-aaaa"]:
         d = subtasks / tid
         d.mkdir()
         (d / "result.json").write_text(
@@ -664,13 +664,13 @@ def test_all_children_passed_false_missing_result(tmp_path: Path):
     """Missing result → False."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = board.task_dir(mas, "doing", "p-10")
+    parent = board.task_dir(mas, "doing", "20260415-p-10-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="p-10", role="orchestrator", goal="g"))
+    board.write_task(parent, Task(id="20260415-p-10-aaaa", role="orchestrator", goal="g"))
     subtasks = parent / "subtasks"
     subtasks.mkdir()
-    plan = Plan(parent_id="p-10", summary="s",
-                subtasks=[SubtaskSpec(id="impl-1", role="implementer", goal="do")])
+    plan = Plan(parent_id="20260415-p-10-aaaa", summary="s",
+                subtasks=[SubtaskSpec(id="20260415-impl-1-aaaa", role="implementer", goal="do")])
 
     result = _all_children_passed(plan, subtasks)
     assert result is False
@@ -680,18 +680,18 @@ def test_all_children_passed_evaluator_verdict_fail(tmp_path: Path):
     """Evaluator result with verdict!=pass → False."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = board.task_dir(mas, "doing", "p-11")
+    parent = board.task_dir(mas, "doing", "20260415-p-11-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="p-11", role="orchestrator", goal="g"))
+    board.write_task(parent, Task(id="20260415-p-11-aaaa", role="orchestrator", goal="g"))
     subtasks = parent / "subtasks"
     subtasks.mkdir()
-    plan = Plan(parent_id="p-11", summary="s",
-                subtasks=[SubtaskSpec(id="eval-1", role="evaluator", goal="eval")])
+    plan = Plan(parent_id="20260415-p-11-aaaa", summary="s",
+                subtasks=[SubtaskSpec(id="20260415-eval-1-aaaa", role="evaluator", goal="eval")])
     (parent / "plan.json").write_text(plan.model_dump_json())
-    d = subtasks / "eval-1"
+    d = subtasks / "20260415-eval-1-aaaa"
     d.mkdir()
     (d / "result.json").write_text(
-        Result(task_id="eval-1", status="success", summary="ok", verdict="fail").model_dump_json()
+        Result(task_id="20260415-eval-1-aaaa", status="success", summary="ok", verdict="fail").model_dump_json()
     )
 
     result = _all_children_passed(plan, subtasks)
@@ -706,19 +706,19 @@ def test_append_revision_cycle_adds_three_subtasks(tmp_path: Path):
     """First revision cycle adds 3 subtasks."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = board.task_dir(mas, "doing", "p-12")
+    parent = board.task_dir(mas, "doing", "20260415-p-12-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="p-12", role="orchestrator", goal="g"))
+    board.write_task(parent, Task(id="20260415-p-12-aaaa", role="orchestrator", goal="g"))
     subtasks = parent / "subtasks"
     subtasks.mkdir()
-    plan = Plan(parent_id="p-12", summary="s",
-                subtasks=[SubtaskSpec(id="eval-1", role="evaluator", goal="eval")],
+    plan = Plan(parent_id="20260415-p-12-aaaa", summary="s",
+                subtasks=[SubtaskSpec(id="20260415-eval-1-aaaa", role="evaluator", goal="eval")],
                 max_revision_cycles=2)
     (parent / "plan.json").write_text(plan.model_dump_json())
 
     _append_revision_cycle(parent, plan, board.read_task(parent), "fix bugs")
 
-    updated = parse_plan(parent / "plan.json", "p-12")
+    updated = parse_plan(parent / "plan.json", "20260415-p-12-aaaa")
     assert len(updated.subtasks) == 4
     ids = {s.id for s in updated.subtasks}
     assert "rev-1-implementer" in ids
@@ -730,18 +730,18 @@ def test_append_revision_cycle_orders_tester_before_implementer(tmp_path: Path):
     """Under TDD the revision cycle is tester → implementer → evaluator."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = board.task_dir(mas, "doing", "p-12b")
+    parent = board.task_dir(mas, "doing", "20260415-p-12b-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="p-12b", role="orchestrator", goal="g"))
+    board.write_task(parent, Task(id="20260415-p-12b-aaaa", role="orchestrator", goal="g"))
     (parent / "subtasks").mkdir()
-    plan = Plan(parent_id="p-12b", summary="s",
-                subtasks=[SubtaskSpec(id="eval-1", role="evaluator", goal="eval")],
+    plan = Plan(parent_id="20260415-p-12b-aaaa", summary="s",
+                subtasks=[SubtaskSpec(id="20260415-eval-1-aaaa", role="evaluator", goal="eval")],
                 max_revision_cycles=2)
     (parent / "plan.json").write_text(plan.model_dump_json())
 
     _append_revision_cycle(parent, plan, board.read_task(parent), "fix it")
 
-    updated = parse_plan(parent / "plan.json", "p-12b")
+    updated = parse_plan(parent / "plan.json", "20260415-p-12b-aaaa")
     rev = [s for s in updated.subtasks if s.id.startswith("rev-1-")]
     assert [s.role for s in rev] == ["tester", "implementer", "evaluator"]
 
@@ -750,13 +750,13 @@ def test_append_revision_cycle_respects_max_cap(tmp_path: Path):
     """At max_revision_cycles, no new subtasks are added."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = board.task_dir(mas, "doing", "p-13")
+    parent = board.task_dir(mas, "doing", "20260415-p-13-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="p-13", role="orchestrator", goal="g"))
+    board.write_task(parent, Task(id="20260415-p-13-aaaa", role="orchestrator", goal="g"))
     subtasks = parent / "subtasks"
     subtasks.mkdir()
     plan = Plan(
-        parent_id="p-13", summary="s",
+        parent_id="20260415-p-13-aaaa", summary="s",
         subtasks=[
             SubtaskSpec(id="rev-1-implementer", role="implementer", goal="r1"),
             SubtaskSpec(id="rev-1-tester", role="tester", goal="r1t"),
@@ -771,7 +771,7 @@ def test_append_revision_cycle_respects_max_cap(tmp_path: Path):
 
     _append_revision_cycle(parent, plan, board.read_task(parent), "more feedback")
 
-    updated = parse_plan(parent / "plan.json", "p-13")
+    updated = parse_plan(parent / "plan.json", "20260415-p-13-aaaa")
     assert len(updated.subtasks) == 6
 
 
@@ -783,9 +783,9 @@ def test_finalize_parent_moves_to_done(tmp_path: Path):
     """_finalize_parent moves parent to done/ and prunes."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = board.task_dir(mas, "doing", "p-14")
+    parent = board.task_dir(mas, "doing", "20260415-p-14-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="p-14", role="orchestrator", goal="g"))
+    board.write_task(parent, Task(id="20260415-p-14-aaaa", role="orchestrator", goal="g"))
     wt = parent / "worktree"
     wt.mkdir()
 
@@ -798,7 +798,7 @@ def test_finalize_parent_moves_to_done(tmp_path: Path):
     mock_commit.assert_called_once()
     mock_prune.assert_called_once()
     assert not parent.exists()
-    assert (mas / "tasks" / "done" / "p-14").exists()
+    assert (mas / "tasks" / "done" / "20260415-p-14-aaaa").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -867,9 +867,9 @@ def test_maybe_dispatch_proposer_skips_at_max_proposed(tmp_path: Path):
     """At max_proposed, proposer is not dispatched."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    board.task_dir(mas, "proposed", "existing").mkdir(parents=True)
-    board.write_task(board.task_dir(mas, "proposed", "existing"),
-                     Task(id="existing", role="orchestrator", goal="g"))
+    board.task_dir(mas, "proposed", "20260415-existing-aaaa").mkdir(parents=True)
+    board.write_task(board.task_dir(mas, "proposed", "20260415-existing-aaaa"),
+                     Task(id="20260415-existing-aaaa", role="orchestrator", goal="g"))
 
     env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg(max_proposed=1))
 
@@ -886,9 +886,9 @@ def test_maybe_dispatch_proposer_skips_when_proposer_in_doing(tmp_path: Path):
     """Existing proposer in doing/ → no new dispatch."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    board.task_dir(mas, "doing", "proposer-running").mkdir(parents=True)
-    board.write_task(board.task_dir(mas, "doing", "proposer-running"),
-                     Task(id="proposer-running", role="proposer", goal="p"))
+    board.task_dir(mas, "doing", "20260415-proposer-running-aaaa").mkdir(parents=True)
+    board.write_task(board.task_dir(mas, "doing", "20260415-proposer-running-aaaa"),
+                     Task(id="20260415-proposer-running-aaaa", role="proposer", goal="p"))
 
     env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg())
 
@@ -987,7 +987,7 @@ def test_worker_orphaned_log_exists_no_pid(tmp_path: Path):
     """Log exists but role not running → orphan."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    td = mas / "tasks" / "doing" / "t1"
+    td = mas / "tasks" / "doing" / "20260415-t1-aaaa"
     td.mkdir(parents=True)
     logs = td / "logs"
     logs.mkdir()
@@ -1009,7 +1009,7 @@ def test_worker_orphaned_live_pid_not_orphan(tmp_path: Path):
     """Live pid exists → not orphan."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    td = mas / "tasks" / "doing" / "t2"
+    td = mas / "tasks" / "doing" / "20260415-t2-aaaa"
     td.mkdir(parents=True)
     logs = td / "logs"
     logs.mkdir()
@@ -1049,6 +1049,7 @@ def test_run_tick_lock_acquired_runs_steps(tmp_path: Path):
     lock_mock = MagicMock()
     with patch("mas.tick._acquire_lock", return_value=lock_mock), \
          patch("mas.tick.load_config", return_value=_cfg()), \
+         patch("mas.tick.validate_config", return_value=[]), \
          patch("mas.tick.project_root", return_value=tmp_path), \
          patch("mas.tick._reap_workers") as mock_reap, \
          patch("mas.tick._advance_doing") as mock_adv, \
@@ -1069,6 +1070,7 @@ def test_run_tick_finally_closes_lock(tmp_path: Path):
     lock_mock = MagicMock()
     with patch("mas.tick._acquire_lock", return_value=lock_mock), \
          patch("mas.tick.load_config", return_value=_cfg()), \
+         patch("mas.tick.validate_config", return_value=[]), \
          patch("mas.tick.project_root", return_value=tmp_path), \
          patch("mas.tick._reap_workers", side_effect=RuntimeError("boom")):
         with pytest.raises(RuntimeError):

@@ -25,6 +25,24 @@ def mas(tmp_path: Path) -> Path:
     d = tmp_path / ".mas"
     d.mkdir(parents=True)
     (d / "logs").mkdir()
+    (d / "prompts").mkdir()
+    (d / "config.yaml").write_text(
+        "providers:\n"
+        "  mock:\n"
+        "    cli: sh\n"
+        "    max_concurrent: 1\n"
+        "    extra_args: []\n"
+    )
+    (d / "roles.yaml").write_text(
+        "roles:\n"
+        "  proposer: {provider: mock}\n"
+        "  orchestrator: {provider: mock}\n"
+        "  implementer: {provider: mock}\n"
+        "  tester: {provider: mock}\n"
+        "  evaluator: {provider: mock}\n"
+    )
+    for role in ("proposer", "orchestrator", "implementer", "tester", "evaluator"):
+        (d / "prompts" / f"{role}.md").write_text("goal=$goal")
     return d
 
 

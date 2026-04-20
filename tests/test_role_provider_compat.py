@@ -79,9 +79,9 @@ def _setup_mas(tmp_path: Path) -> Path:
 def test_agentic_adapter_gets_no_stdin_text(tmp_path: Path, role: str):
     """Agentic adapters must receive stdin_text=None so they don't read stdin."""
     mas = _setup_mas(tmp_path)
-    task_dir_ = board.task_dir(mas, "doing", "t1")
+    task_dir_ = board.task_dir(mas, "doing", "20260415-t1-aaaa")
     task_dir_.mkdir(parents=True)
-    task = Task(id="t1", role=role, goal="do something")
+    task = Task(id="20260415-t1-aaaa", role=role, goal="do something")
 
     cfg = _agentic_cfg()
     env = TickEnv(repo=tmp_path, mas=mas, cfg=cfg)
@@ -106,9 +106,9 @@ def test_agentic_adapter_gets_no_stdin_text(tmp_path: Path, role: str):
 def test_nonagentic_adapter_gets_prompt_as_stdin_text(tmp_path: Path, role: str):
     """Non-agentic adapters must receive stdin_text=prompt so the prompt reaches the model."""
     mas = _setup_mas(tmp_path)
-    task_dir_ = board.task_dir(mas, "doing", "t2")
+    task_dir_ = board.task_dir(mas, "doing", "20260415-t2-aaaa")
     task_dir_.mkdir(parents=True)
-    task = Task(id="t2", role=role, goal="do something")
+    task = Task(id="20260415-t2-aaaa", role=role, goal="do something")
 
     cfg = _nonagentic_cfg()
     env = TickEnv(repo=tmp_path, mas=mas, cfg=cfg)
@@ -140,12 +140,12 @@ def test_nonagentic_adapter_gets_prompt_as_stdin_text(tmp_path: Path, role: str)
 def test_proposer_agentic_result_materializes_proposal(tmp_path: Path):
     """Agentic proposer writes result.json with handoff → tick creates proposed task."""
     mas = _setup_mas(tmp_path)
-    parent = board.task_dir(mas, "doing", "prop-1")
+    parent = board.task_dir(mas, "doing", "20260415-prop-1-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="prop-1", role="proposer", goal="propose"))
+    board.write_task(parent, Task(id="20260415-prop-1-aaaa", role="proposer", goal="propose"))
 
     result = Result(
-        task_id="prop-1",
+        task_id="20260415-prop-1-aaaa",
         status="success",
         summary="Add test coverage for roles",
         handoff={
@@ -170,12 +170,12 @@ def test_proposer_agentic_result_materializes_proposal(tmp_path: Path):
 def test_proposer_nonagentic_result_materializes_proposal(tmp_path: Path):
     """Non-agentic proposer writes result.json with handoff → same materialization path."""
     mas = _setup_mas(tmp_path)
-    parent = board.task_dir(mas, "doing", "prop-2")
+    parent = board.task_dir(mas, "doing", "20260415-prop-2-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="prop-2", role="proposer", goal="propose"))
+    board.write_task(parent, Task(id="20260415-prop-2-aaaa", role="proposer", goal="propose"))
 
     result = Result(
-        task_id="prop-2",
+        task_id="20260415-prop-2-aaaa",
         status="success",
         summary="Improve error handling",
         handoff={
@@ -200,12 +200,12 @@ def test_proposer_nonagentic_result_materializes_proposal(tmp_path: Path):
 def test_proposer_result_without_handoff_goal_uses_summary(tmp_path: Path):
     """If handoff has no goal key, fall back to result.summary."""
     mas = _setup_mas(tmp_path)
-    parent = board.task_dir(mas, "doing", "prop-3")
+    parent = board.task_dir(mas, "doing", "20260415-prop-3-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="prop-3", role="proposer", goal="propose"))
+    board.write_task(parent, Task(id="20260415-prop-3-aaaa", role="proposer", goal="propose"))
 
     result = Result(
-        task_id="prop-3",
+        task_id="20260415-prop-3-aaaa",
         status="success",
         summary="Refactor config loader",
         handoff={},  # no 'goal' key
@@ -230,22 +230,22 @@ def test_proposer_result_without_handoff_goal_uses_summary(tmp_path: Path):
 def test_orchestrator_agentic_reads_plan_json(tmp_path: Path):
     """Agentic orchestrator writes plan.json → tick parses it and moves to subtasks."""
     mas = _setup_mas(tmp_path)
-    parent = board.task_dir(mas, "doing", "orch-1")
+    parent = board.task_dir(mas, "doing", "20260415-orch-1-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="orch-1", role="orchestrator", goal="do work"))
+    board.write_task(parent, Task(id="20260415-orch-1-aaaa", role="orchestrator", goal="do work"))
     (parent / "worktree").mkdir()
 
     # Simulate agentic orchestrator having written plan.json + result.json.
     plan = Plan(
-        parent_id="orch-1",
+        parent_id="20260415-orch-1-aaaa",
         summary="implement and test",
         subtasks=[
-            SubtaskSpec(id="impl-1", role="implementer", goal="implement feature"),
-            SubtaskSpec(id="test-1", role="tester", goal="test feature"),
+            SubtaskSpec(id="20260415-impl-1-aaaa", role="implementer", goal="implement feature"),
+            SubtaskSpec(id="20260415-test-1-aaaa", role="tester", goal="test feature"),
         ],
     )
     (parent / "plan.json").write_text(plan.model_dump_json())
-    result = Result(task_id="orch-1", status="success", summary="plan emitted", duration_s=1.0)
+    result = Result(task_id="20260415-orch-1-aaaa", status="success", summary="plan emitted", duration_s=1.0)
     (parent / "result.json").write_text(result.model_dump_json())
 
     env = TickEnv(repo=tmp_path, mas=mas, cfg=_agentic_cfg())
@@ -253,7 +253,7 @@ def test_orchestrator_agentic_reads_plan_json(tmp_path: Path):
 
     # Subtasks directory should be created and first subtask ready to dispatch.
     assert (parent / "subtasks").exists(), "subtasks dir should exist after plan is parsed"
-    assert (parent / "subtasks" / "impl-1").exists() or not (parent / "subtasks" / "impl-1" / "result.json").exists()
+    assert (parent / "subtasks" / "20260415-impl-1-aaaa").exists() or not (parent / "subtasks" / "20260415-impl-1-aaaa" / "result.json").exists()
 
 
 def test_orchestrator_nonagentic_result_without_plan_json_is_not_lost(tmp_path: Path):
@@ -266,23 +266,23 @@ def test_orchestrator_nonagentic_result_without_plan_json_is_not_lost(tmp_path: 
     materializing the plan.
     """
     mas = _setup_mas(tmp_path)
-    parent = board.task_dir(mas, "doing", "orch-2")
+    parent = board.task_dir(mas, "doing", "20260415-orch-2-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="orch-2", role="orchestrator", goal="do work"))
+    board.write_task(parent, Task(id="20260415-orch-2-aaaa", role="orchestrator", goal="do work"))
     (parent / "worktree").mkdir()
 
     # Non-agentic orchestrator wrote result.json with plan in handoff but no plan.json.
     plan_data = {
-        "parent_id": "orch-2",
+        "parent_id": "20260415-orch-2-aaaa",
         "summary": "implement then test",
         "max_revision_cycles": 2,
         "subtasks": [
-            {"id": "impl-1", "role": "implementer", "goal": "implement", "inputs": {}, "constraints": {}},
-            {"id": "test-1", "role": "tester", "goal": "test", "inputs": {}, "constraints": {}},
+            {"id": "20260415-impl-1-aaaa", "role": "implementer", "goal": "implement", "inputs": {}, "constraints": {}},
+            {"id": "20260415-test-1-aaaa", "role": "tester", "goal": "test", "inputs": {}, "constraints": {}},
         ],
     }
     result = Result(
-        task_id="orch-2",
+        task_id="20260415-orch-2-aaaa",
         status="success",
         summary="plan emitted",
         handoff=plan_data,
@@ -301,7 +301,7 @@ def test_orchestrator_nonagentic_result_without_plan_json_is_not_lost(tmp_path: 
     )
     plan = Plan.model_validate_json((parent / "plan.json").read_text())
     assert len(plan.subtasks) == 2
-    assert plan.subtasks[0].id == "impl-1"
+    assert plan.subtasks[0].id == "20260415-impl-1-aaaa"
 
 
 # ---------------------------------------------------------------------------
@@ -315,29 +315,29 @@ def test_worker_nonagentic_success_result_consumed(tmp_path: Path, role: str):
     the plan to the next subtask (no special handling needed — just verify the
     tick reads it the same way it would for an agentic provider)."""
     mas = _setup_mas(tmp_path)
-    parent = board.task_dir(mas, "doing", "p1")
+    parent = board.task_dir(mas, "doing", "20260415-p1-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="p1", role="orchestrator", goal="g"))
+    board.write_task(parent, Task(id="20260415-p1-aaaa", role="orchestrator", goal="g"))
     (parent / "worktree").mkdir()
 
     plan = Plan(
-        parent_id="p1",
+        parent_id="20260415-p1-aaaa",
         summary="s",
         subtasks=[
-            SubtaskSpec(id=f"{role}-1", role=role, goal="do"),
-            SubtaskSpec(id="eval-1", role="evaluator", goal="evaluate"),
+            SubtaskSpec(id=f"20260415-{role}-1-aaaa", role=role, goal="do"),
+            SubtaskSpec(id="20260415-eval-1-aaaa", role="evaluator", goal="evaluate"),
         ],
     )
     (parent / "plan.json").write_text(plan.model_dump_json())
 
-    child = parent / "subtasks" / f"{role}-1"
+    child = parent / "subtasks" / f"20260415-{role}-1-aaaa"
     child.mkdir(parents=True)
-    result = Result(task_id=f"{role}-1", status="success", summary="done", duration_s=1.0)
+    result = Result(task_id=f"20260415-{role}-1-aaaa", status="success", summary="done", duration_s=1.0)
     (child / "result.json").write_text(result.model_dump_json())
 
     # Fixture result for the next subtask dispatch (evaluator).
     fixture = tmp_path / "fx.json"
-    fixture.write_text('{"task_id":"eval-1","status":"success","summary":"ok","verdict":"pass","duration_s":0}')
+    fixture.write_text('{"task_id":"20260415-eval-1-aaaa","status":"success","summary":"ok","verdict":"pass","duration_s":0}')
     cfg = _agentic_cfg()
     cfg.providers["mock"] = ProviderConfig(cli="sh", max_concurrent=4, extra_args=[str(fixture)])
 
@@ -345,7 +345,7 @@ def test_worker_nonagentic_success_result_consumed(tmp_path: Path, role: str):
     _advance_one(env, parent)
 
     # The next subtask (evaluator) should have been dispatched.
-    assert (parent / "subtasks" / "eval-1" / "task.json").exists(), (
+    assert (parent / "subtasks" / "20260415-eval-1-aaaa" / "task.json").exists(), (
         f"after {role} success, next subtask must be dispatched"
     )
 
@@ -354,21 +354,21 @@ def test_worker_nonagentic_success_result_consumed(tmp_path: Path, role: str):
 def test_worker_nonagentic_failure_result_triggers_retry(tmp_path: Path, role: str):
     """Non-agentic failure result triggers retry logic identical to agentic."""
     mas = _setup_mas(tmp_path)
-    parent = board.task_dir(mas, "doing", "p2")
+    parent = board.task_dir(mas, "doing", "20260415-p2-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="p2", role="orchestrator", goal="g"))
+    board.write_task(parent, Task(id="20260415-p2-aaaa", role="orchestrator", goal="g"))
     (parent / "worktree").mkdir()
 
     plan = Plan(
-        parent_id="p2",
+        parent_id="20260415-p2-aaaa",
         summary="s",
-        subtasks=[SubtaskSpec(id=f"{role}-1", role=role, goal="do")],
+        subtasks=[SubtaskSpec(id=f"20260415-{role}-1-aaaa", role=role, goal="do")],
     )
     (parent / "plan.json").write_text(plan.model_dump_json())
 
-    child = parent / "subtasks" / f"{role}-1"
+    child = parent / "subtasks" / f"20260415-{role}-1-aaaa"
     child.mkdir(parents=True)
-    result = Result(task_id=f"{role}-1", status="failure", summary="broke", duration_s=0.5)
+    result = Result(task_id=f"20260415-{role}-1-aaaa", status="failure", summary="broke", duration_s=0.5)
     (child / "result.json").write_text(result.model_dump_json())
 
     env = TickEnv(repo=tmp_path, mas=mas, cfg=_nonagentic_cfg())
@@ -390,23 +390,23 @@ def test_evaluator_pass_verdict_finalizes_parent(tmp_path: Path):
     import mas.worktree as wt_mod
 
     mas = _setup_mas(tmp_path)
-    parent = board.task_dir(mas, "doing", "p3")
+    parent = board.task_dir(mas, "doing", "20260415-p3-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="p3", role="orchestrator", goal="g"))
+    board.write_task(parent, Task(id="20260415-p3-aaaa", role="orchestrator", goal="g"))
     wt = parent / "worktree"
     wt.mkdir()
 
     plan = Plan(
-        parent_id="p3",
+        parent_id="20260415-p3-aaaa",
         summary="s",
-        subtasks=[SubtaskSpec(id="eval-1", role="evaluator", goal="evaluate")],
+        subtasks=[SubtaskSpec(id="20260415-eval-1-aaaa", role="evaluator", goal="evaluate")],
     )
     (parent / "plan.json").write_text(plan.model_dump_json())
 
-    child = parent / "subtasks" / "eval-1"
+    child = parent / "subtasks" / "20260415-eval-1-aaaa"
     child.mkdir(parents=True)
     result = Result(
-        task_id="eval-1", status="success", verdict="pass", summary="looks good", duration_s=1.0
+        task_id="20260415-eval-1-aaaa", status="success", verdict="pass", summary="looks good", duration_s=1.0
     )
     (child / "result.json").write_text(result.model_dump_json())
 
@@ -415,28 +415,28 @@ def test_evaluator_pass_verdict_finalizes_parent(tmp_path: Path):
         _advance_one(env, parent)
 
     assert not parent.exists(), "parent must move to done/ after evaluator pass"
-    assert (mas / "tasks" / "done" / "p3").exists()
+    assert (mas / "tasks" / "done" / "20260415-p3-aaaa").exists()
 
 
 def test_evaluator_fail_verdict_triggers_retry(tmp_path: Path):
     """Evaluator returning verdict=fail triggers subtask retry (not revision cycle)."""
     mas = _setup_mas(tmp_path)
-    parent = board.task_dir(mas, "doing", "p4")
+    parent = board.task_dir(mas, "doing", "20260415-p4-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="p4", role="orchestrator", goal="g"))
+    board.write_task(parent, Task(id="20260415-p4-aaaa", role="orchestrator", goal="g"))
     (parent / "worktree").mkdir()
 
     plan = Plan(
-        parent_id="p4",
+        parent_id="20260415-p4-aaaa",
         summary="s",
-        subtasks=[SubtaskSpec(id="eval-1", role="evaluator", goal="evaluate")],
+        subtasks=[SubtaskSpec(id="20260415-eval-1-aaaa", role="evaluator", goal="evaluate")],
     )
     (parent / "plan.json").write_text(plan.model_dump_json())
 
-    child = parent / "subtasks" / "eval-1"
+    child = parent / "subtasks" / "20260415-eval-1-aaaa"
     child.mkdir(parents=True)
     result = Result(
-        task_id="eval-1", status="failure", verdict="fail", summary="tests failed", duration_s=1.0
+        task_id="20260415-eval-1-aaaa", status="failure", verdict="fail", summary="tests failed", duration_s=1.0
     )
     (child / "result.json").write_text(result.model_dump_json())
 
@@ -452,22 +452,22 @@ def test_evaluator_fail_verdict_triggers_retry(tmp_path: Path):
 def test_evaluator_needs_revision_appends_cycle(tmp_path: Path):
     """Evaluator returning verdict=needs_revision appends a revision cycle."""
     mas = _setup_mas(tmp_path)
-    parent = board.task_dir(mas, "doing", "p5")
+    parent = board.task_dir(mas, "doing", "20260415-p5-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="p5", role="orchestrator", goal="g"))
+    board.write_task(parent, Task(id="20260415-p5-aaaa", role="orchestrator", goal="g"))
     (parent / "worktree").mkdir()
 
     plan = Plan(
-        parent_id="p5",
+        parent_id="20260415-p5-aaaa",
         summary="s",
-        subtasks=[SubtaskSpec(id="eval-1", role="evaluator", goal="evaluate")],
+        subtasks=[SubtaskSpec(id="20260415-eval-1-aaaa", role="evaluator", goal="evaluate")],
     )
     (parent / "plan.json").write_text(plan.model_dump_json())
 
-    child = parent / "subtasks" / "eval-1"
+    child = parent / "subtasks" / "20260415-eval-1-aaaa"
     child.mkdir(parents=True)
     result = Result(
-        task_id="eval-1",
+        task_id="20260415-eval-1-aaaa",
         status="success",
         verdict="needs_revision",
         summary="needs work",
@@ -493,24 +493,24 @@ def test_evaluator_nonagentic_pass_verdict_finalizes_parent(tmp_path: Path):
     import mas.worktree as wt_mod
 
     mas = _setup_mas(tmp_path)
-    parent = board.task_dir(mas, "doing", "p6")
+    parent = board.task_dir(mas, "doing", "20260415-p6-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="p6", role="orchestrator", goal="g"))
+    board.write_task(parent, Task(id="20260415-p6-aaaa", role="orchestrator", goal="g"))
     wt = parent / "worktree"
     wt.mkdir()
 
     plan = Plan(
-        parent_id="p6",
+        parent_id="20260415-p6-aaaa",
         summary="s",
-        subtasks=[SubtaskSpec(id="eval-1", role="evaluator", goal="evaluate")],
+        subtasks=[SubtaskSpec(id="20260415-eval-1-aaaa", role="evaluator", goal="evaluate")],
     )
     (parent / "plan.json").write_text(plan.model_dump_json())
 
-    child = parent / "subtasks" / "eval-1"
+    child = parent / "subtasks" / "20260415-eval-1-aaaa"
     child.mkdir(parents=True)
     # Simulates what the ollama wrapper writes after normalizing the model output.
     result = Result(
-        task_id="eval-1", status="success", verdict="pass", summary="all good", duration_s=3.0
+        task_id="20260415-eval-1-aaaa", status="success", verdict="pass", summary="all good", duration_s=3.0
     )
     (child / "result.json").write_text(result.model_dump_json())
 
@@ -518,6 +518,6 @@ def test_evaluator_nonagentic_pass_verdict_finalizes_parent(tmp_path: Path):
         env = TickEnv(repo=tmp_path, mas=mas, cfg=_nonagentic_cfg())
         _advance_one(env, parent)
 
-    assert (mas / "tasks" / "done" / "p6").exists(), (
+    assert (mas / "tasks" / "done" / "20260415-p6-aaaa").exists(), (
         "non-agentic evaluator pass verdict must finalize parent"
     )

@@ -182,12 +182,12 @@ class TestRetry:
 class TestLogs:
     def test_logs_prints_latest(self, tmp_board, monkeypatch):
         monkeypatch.chdir(tmp_board.parent)
-        d = _write_task(tmp_board, "doing", "20260416-log-gggg")
+        d = _write_task(tmp_board, "doing", "20260416-log-aaaa")
         log_dir = d / "logs"
         log_dir.mkdir()
         (log_dir / "implementer.log").write_text("line1\nline2\n")
 
-        result = runner.invoke(app, ["logs", "20260416-log-gggg"])
+        result = runner.invoke(app, ["logs", "20260416-log-aaaa"])
         assert result.exit_code == 0
         assert "line1" in result.output
 
@@ -199,7 +199,7 @@ class TestLogs:
 
     def test_logs_no_logs(self, tmp_board, monkeypatch):
         monkeypatch.chdir(tmp_board.parent)
-        _write_task(tmp_board, "doing", "20260416-nolog-hhhh")
-        result = runner.invoke(app, ["logs", "20260416-nolog-hhhh"])
+        _write_task(tmp_board, "doing", "20260416-nolog-bbbb")
+        result = runner.invoke(app, ["logs", "20260416-nolog-bbbb"])
         assert result.exit_code == 0
         assert "no logs" in result.output

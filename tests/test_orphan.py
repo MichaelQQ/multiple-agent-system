@@ -51,8 +51,8 @@ def _seed_parent_with_plan(mas: Path, parent_id: str, child_id: str) -> Path:
 def test_orphan_child_synthesizes_failure_and_retries(tmp_path: Path):
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = _seed_parent_with_plan(mas, "p1", "impl-1")
-    child = parent / "subtasks" / "impl-1"
+    parent = _seed_parent_with_plan(mas, "20260415-p1-aaaa", "20260415-impl-1-aaaa")
+    child = parent / "subtasks" / "20260415-impl-1-aaaa"
     child.mkdir(parents=True)
     # Simulate a previous dispatch that died: log exists, no live pid, no result.
     (child / "logs").mkdir()
@@ -73,8 +73,8 @@ def test_orphan_child_synthesizes_failure_and_retries(tmp_path: Path):
 def test_orphan_child_fails_parent_after_retries(tmp_path: Path):
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = _seed_parent_with_plan(mas, "p2", "impl-1")
-    child = parent / "subtasks" / "impl-1"
+    parent = _seed_parent_with_plan(mas, "20260415-p2-aaaa", "20260415-impl-1-aaaa")
+    child = parent / "subtasks" / "20260415-impl-1-aaaa"
     child.mkdir(parents=True)
     (child / "logs").mkdir()
     # Already at final attempt (max_retries=2 → limit=3).
@@ -85,20 +85,20 @@ def test_orphan_child_fails_parent_after_retries(tmp_path: Path):
     _advance_one(env, parent)
 
     assert not parent.exists()
-    assert (mas / "tasks" / "failed" / "p2").exists()
+    assert (mas / "tasks" / "failed" / "20260415-p2-aaaa").exists()
 
 
 def test_no_orphan_when_log_missing(tmp_path: Path):
     """Fresh subtask (never dispatched) must not trigger orphan synthesis."""
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = _seed_parent_with_plan(mas, "p3", "impl-1")
-    child = parent / "subtasks" / "impl-1"
+    parent = _seed_parent_with_plan(mas, "20260415-p3-aaaa", "20260415-impl-1-aaaa")
+    child = parent / "subtasks" / "20260415-impl-1-aaaa"
     child.mkdir(parents=True)
 
     # Use mock provider pointing at a fixture result so dispatch can run end-to-end.
     fixture = tmp_path / "fx.json"
-    fixture.write_text('{"task_id":"impl-1","status":"success","summary":"ok","duration_s":0}')
+    fixture.write_text('{"task_id":"20260415-impl-1-aaaa","status":"success","summary":"ok","duration_s":0}')
     cfg = _cfg()
     cfg.providers["mock"] = ProviderConfig(cli="sh", max_concurrent=1, extra_args=[str(fixture)])
     (mas / "prompts").mkdir(exist_ok=True)
@@ -114,9 +114,9 @@ def test_no_orphan_when_log_missing(tmp_path: Path):
 def test_orphan_proposer_moves_to_failed(tmp_path: Path):
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = board.task_dir(mas, "doing", "prop-1")
+    parent = board.task_dir(mas, "doing", "20260415-prop-1-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="prop-1", role="proposer", goal="propose"))
+    board.write_task(parent, Task(id="20260415-prop-1-aaaa", role="proposer", goal="propose"))
     (parent / "logs").mkdir()
     (parent / "logs" / "proposer-1.log").write_text("crash\n")
 
@@ -124,15 +124,15 @@ def test_orphan_proposer_moves_to_failed(tmp_path: Path):
     _advance_one(env, parent)
 
     assert not parent.exists()
-    assert (mas / "tasks" / "failed" / "prop-1").exists()
+    assert (mas / "tasks" / "failed" / "20260415-prop-1-aaaa").exists()
 
 
 def test_orphan_orchestrator_retries_then_fails(tmp_path: Path):
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    parent = board.task_dir(mas, "doing", "p4")
+    parent = board.task_dir(mas, "doing", "20260415-p4-aaaa")
     parent.mkdir(parents=True)
-    board.write_task(parent, Task(id="p4", role="orchestrator", goal="g"))
+    board.write_task(parent, Task(id="20260415-p4-aaaa", role="orchestrator", goal="g"))
     (parent / "worktree").mkdir()
     (parent / "logs").mkdir()
     (parent / "logs" / "orchestrator-1.log").write_text("crash\n")
@@ -149,4 +149,4 @@ def test_orphan_orchestrator_retries_then_fails(tmp_path: Path):
     _advance_one(env, parent)
     # max_retries=1 → limit=2. attempt=2 NOT < 2 → move to failed.
     assert not parent.exists()
-    assert (mas / "tasks" / "failed" / "p4").exists()
+    assert (mas / "tasks" / "failed" / "20260415-p4-aaaa").exists()

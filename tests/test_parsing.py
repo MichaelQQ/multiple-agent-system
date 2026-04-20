@@ -94,12 +94,8 @@ def test_parse_plan_missing_subtasks_raises_specific_error(tmp_path: Path):
     assert "subtasks" in str(exc).lower()
 
 
-def test_parse_plan_tolerates_extra_fields(tmp_path: Path):
-    """Extra unknown fields should be tolerated (graceful degradation).
-
-    Currently raises pydantic ValidationError because Plan model has extra="forbid".
-    Expected behavior: parse_plan should strip unknown fields and return valid Plan.
-    """
+def test_parse_plan_rejects_extra_fields(tmp_path: Path):
+    """Extra unknown fields must be rejected (strict schema, extra="forbid")."""
     plan_path = tmp_path / "plan.json"
     plan_path.write_text(json.dumps({
         "parent_id": "p1",
@@ -109,10 +105,9 @@ def test_parse_plan_tolerates_extra_fields(tmp_path: Path):
         "extra_data": {"foo": "bar"},
     }))
 
-    result = parse_plan(plan_path, "parent-1")
-    assert result.parent_id == "p1"
-    assert result.summary == "test"
-    assert result.subtasks == []
+    with pytest.raises(Exception) as exc_info:
+        parse_plan(plan_path, "parent-1")
+    assert "PlanParseError" in type(exc_info.value).__name__
 
 
 def test_parse_plan_truncated_input_raises_specific_error(tmp_path: Path):
@@ -251,25 +246,21 @@ def test_read_task_missing_goal_raises_specific_error(mas: Path):
         f"Expected custom TaskReadError, got {type(exc).__name__}"
 
 
-def test_read_task_extra_fields_graceful_degradation(mas: Path):
-    """Extra fields should be stripped, core fields extracted.
-
-    Currently works because read_task filters to known fields before validation.
-    """
-    task_dir = board.task_dir(mas, "proposed", "t1")
+def test_read_task_extra_fields_rejected(mas: Path):
+    """Extra fields must be rejected (strict schema, extra="forbid")."""
+    task_dir = board.task_dir(mas, "proposed", "20260415-t1-aaaa")
     task_dir.mkdir(parents=True)
     (task_dir / "task.json").write_text(json.dumps({
-        "id": "t1",
+        "id": "20260415-t1-aaaa",
         "role": "proposer",
         "goal": "test goal",
         "extra_field1": "ignored",
         "extra_field2": {"nested": "ignored"},
     }))
 
-    result = board.read_task(task_dir)
-    assert result.id == "t1"
-    assert result.role == "proposer"
-    assert result.goal == "test goal"
+    with pytest.raises(Exception) as exc_info:
+        board.read_task(task_dir)
+    assert "TaskReadError" in type(exc_info.value).__name__
 
 
 def test_read_task_empty_file_raises_specific_error(mas: Path):

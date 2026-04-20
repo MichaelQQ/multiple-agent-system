@@ -16,12 +16,12 @@ def test_previous_failure_injection(tmp_path: Path):
 
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    task_dir = board.task_dir(mas, "doing", "t1")
+    task_dir = board.task_dir(mas, "doing", "20260415-t1-aaaa")
     task_dir.mkdir(parents=True)
 
     # Use mock provider with a fixture result.
     fixture = tmp_path / "fx.json"
-    fixture.write_text('{"task_id":"t1","status":"success","summary":"ok","duration_s":0}')
+    fixture.write_text('{"task_id":"20260415-t1-aaaa","status":"success","summary":"ok","duration_s":0}')
 
     cfg = MasConfig(
         providers={"mock": ProviderConfig(cli="sh", max_concurrent=1, extra_args=[str(fixture)])},
@@ -41,7 +41,7 @@ def test_previous_failure_injection(tmp_path: Path):
     (mas / "prompts" / "implementer.md").write_text("goal=$goal prev=$previous_failure")
 
     env = TickEnv(repo=tmp_path, mas=mas, cfg=cfg)
-    task = Task(id="t1", role="implementer", goal="do")
+    task = Task(id="20260415-t1-aaaa", role="implementer", goal="do")
     _dispatch_role(env, task, task_dir, tmp_path, role="implementer")
 
     # .previous_failure should be consumed; task.json should contain the marker.

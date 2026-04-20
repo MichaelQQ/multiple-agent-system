@@ -90,11 +90,11 @@ def test_board_move_logs_transition(tmp_path):
 
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    src = mas / "tasks" / "proposed" / "task-abc"
-    task = Task(id="task-abc", role="orchestrator", goal="test goal")
+    src = mas / "tasks" / "proposed" / "20260415-task-abc-aaaa"
+    task = Task(id="20260415-task-abc-aaaa", role="orchestrator", goal="test goal")
     board.write_task(src, task)
 
-    dst = mas / "tasks" / "doing" / "task-abc"
+    dst = mas / "tasks" / "doing" / "20260415-task-abc-aaaa"
     board.move(src, dst)
 
     result = read_transitions(dst)
@@ -107,11 +107,11 @@ def test_board_move_with_reason(tmp_path):
 
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    src = mas / "tasks" / "proposed" / "task-xyz"
-    task = Task(id="task-xyz", role="orchestrator", goal="test")
+    src = mas / "tasks" / "proposed" / "20260415-task-xyz-aaaa"
+    task = Task(id="20260415-task-xyz-aaaa", role="orchestrator", goal="test")
     board.write_task(src, task)
 
-    dst = mas / "tasks" / "doing" / "task-xyz"
+    dst = mas / "tasks" / "doing" / "20260415-task-xyz-aaaa"
     board.move(src, dst, reason="manual_promote")
 
     result = read_transitions(dst)
@@ -207,11 +207,11 @@ def test_retry_logs_manual_retry_reason(tmp_path):
 
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)
-    src = mas / "tasks" / "failed" / "task-retry"
-    task = Task(id="task-retry", role="orchestrator", goal="test")
+    src = mas / "tasks" / "failed" / "20260415-task-retry-aaaa"
+    task = Task(id="20260415-task-retry-aaaa", role="orchestrator", goal="test")
     board.write_task(src, task)
 
-    dst = mas / "tasks" / "doing" / "task-retry"
+    dst = mas / "tasks" / "doing" / "20260415-task-retry-aaaa"
     board.move(src, dst, reason="manual_retry")
 
     result = read_transitions(dst)

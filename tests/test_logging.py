@@ -131,16 +131,16 @@ class TestBoardMoveLogging:
         mas = tmp_path / ".mas"
         board.ensure_layout(mas)
 
-        src = board.task_dir(mas, "proposed", "move-test-1")
+        src = board.task_dir(mas, "proposed", "20260415-move-test-1-aaaa")
         src.mkdir(parents=True)
-        board.write_task(src, board.Task(id="move-test-1", role="orchestrator", goal="g"))
-        dst = board.task_dir(mas, "doing", "move-test-1")
+        board.write_task(src, board.Task(id="20260415-move-test-1-aaaa", role="orchestrator", goal="g"))
+        dst = board.task_dir(mas, "doing", "20260415-move-test-1-aaaa")
 
         board.move(src, dst)
 
         output = log_file.read_text().strip()
         parsed = json.loads(output)
-        assert parsed["task_id"] == "move-test-1"
+        assert parsed["task_id"] == "20260415-move-test-1-aaaa"
 
     def test_board_move_includes_from_column(self, tmp_path: Path):
         log_file = tmp_path / "board_move_from.log"
@@ -149,10 +149,10 @@ class TestBoardMoveLogging:
         mas = tmp_path / ".mas"
         board.ensure_layout(mas)
 
-        src = board.task_dir(mas, "proposed", "move-test-2")
+        src = board.task_dir(mas, "proposed", "20260415-move-test-2-aaaa")
         src.mkdir(parents=True)
-        board.write_task(src, board.Task(id="move-test-2", role="orchestrator", goal="g"))
-        dst = board.task_dir(mas, "doing", "move-test-2")
+        board.write_task(src, board.Task(id="20260415-move-test-2-aaaa", role="orchestrator", goal="g"))
+        dst = board.task_dir(mas, "doing", "20260415-move-test-2-aaaa")
 
         board.move(src, dst)
 
@@ -168,10 +168,10 @@ class TestBoardMoveLogging:
         mas = tmp_path / ".mas"
         board.ensure_layout(mas)
 
-        src = board.task_dir(mas, "doing", "move-test-3")
+        src = board.task_dir(mas, "doing", "20260415-move-test-3-aaaa")
         src.mkdir(parents=True)
-        board.write_task(src, board.Task(id="move-test-3", role="orchestrator", goal="g"))
-        dst = board.task_dir(mas, "done", "move-test-3")
+        board.write_task(src, board.Task(id="20260415-move-test-3-aaaa", role="orchestrator", goal="g"))
+        dst = board.task_dir(mas, "done", "20260415-move-test-3-aaaa")
 
         board.move(src, dst)
 

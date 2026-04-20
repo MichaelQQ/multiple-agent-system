@@ -23,7 +23,7 @@ TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates" / "prompts"
 
 
 def _make_task(role: str) -> Task:
-    return Task(id="t1", role=role, goal="test goal", parent_id="parent-1")
+    return Task(id="20260415-t1-aaaa", role=role, goal="test goal", parent_id="parent-1")
 
 
 def test_render_prompt_substitutes_task_dir(tmp_path: Path):
@@ -79,7 +79,7 @@ def test_render_prompt_injects_prior_results_json(tmp_path: Path):
     template.write_text("Priors:\n$prior_results_json\n")
 
     task = Task(
-        id="impl-1",
+        id="20260415-impl-1-aaaa",
         role="implementer",
         goal="make tests pass",
         parent_id="p",
