@@ -2,7 +2,69 @@ from __future__ import annotations
 
 from pydantic import ValidationError as PydanticValidationError
 
-__all__ = ["ConfigValidationError"]
+__all__ = [
+    "ConfigValidationError",
+    "PlanParseError",
+    "TaskReadError",
+    "ResultReadError",
+]
+
+
+class PlanParseError(Exception):
+    def __init__(self, message: str, path: str | None = None, raw_snippet: str | None = None, cause: Exception | None = None):
+        super().__init__(message)
+        self.path = path
+        self.raw_snippet = raw_snippet
+        self.cause = cause
+
+    def __str__(self) -> str:
+        parts = [super().__str__()]
+        if self.path:
+            parts.insert(0, f"File: {self.path}")
+        if self.raw_snippet:
+            snippet = self.raw_snippet[:100] + "..." if len(self.raw_snippet or "") > 100 else self.raw_snippet
+            parts.append(f"Content snippet: {snippet!r}")
+        if self.cause:
+            parts.append(f"Caused by: {type(self.cause).__name__}: {self.cause}")
+        return " | ".join(parts)
+
+
+class TaskReadError(Exception):
+    def __init__(self, message: str, path: str | None = None, raw_snippet: str | None = None, cause: Exception | None = None):
+        super().__init__(message)
+        self.path = path
+        self.raw_snippet = raw_snippet
+        self.cause = cause
+
+    def __str__(self) -> str:
+        parts = [super().__str__()]
+        if self.path:
+            parts.insert(0, f"File: {self.path}")
+        if self.raw_snippet:
+            snippet = self.raw_snippet[:100] + "..." if len(self.raw_snippet or "") > 100 else self.raw_snippet
+            parts.append(f"Content snippet: {snippet!r}")
+        if self.cause:
+            parts.append(f"Caused by: {type(self.cause).__name__}: {self.cause}")
+        return " | ".join(parts)
+
+
+class ResultReadError(Exception):
+    def __init__(self, message: str, path: str | None = None, raw_snippet: str | None = None, cause: Exception | None = None):
+        super().__init__(message)
+        self.path = path
+        self.raw_snippet = raw_snippet
+        self.cause = cause
+
+    def __str__(self) -> str:
+        parts = [super().__str__()]
+        if self.path:
+            parts.insert(0, f"File: {self.path}")
+        if self.raw_snippet:
+            snippet = self.raw_snippet[:100] + "..." if len(self.raw_snippet or "") > 100 else self.raw_snippet
+            parts.append(f"Content snippet: {snippet!r}")
+        if self.cause:
+            parts.append(f"Caused by: {type(self.cause).__name__}: {self.cause}")
+        return " | ".join(parts)
 
 
 class ConfigValidationError(Exception):

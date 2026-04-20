@@ -121,6 +121,18 @@ The `board.read_task()` and `board.read_plan()` helpers parse with
 - `Result.duration_s` must be non-negative
 - `ProposalHandoff` model for proposer handoffs
 
+### Error handling
+
+mas uses custom exception types in `src/mas/errors.py` for clear, actionable error messages:
+
+| Exception         | Raised By                  | Includes                                         |
+|------------------|----------------------------|--------------------------------------------------|
+| `PlanParseError` | `parse_plan()` in roles.py | file path, content snippet, root cause            |
+| `TaskReadError`  | `read_task()` in board.py  | file path, content snippet, root cause          |
+| `ResultReadError`| `read_result()` in board.py| file path, content snippet, root cause          |
+
+These exceptions provide context for debugging: file path, a snippet of the problematic content, and the original exception.
+
 ## Failure handling
 
 - Per-role `max_retries` (default 2) with the previous failure summary
