@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from pathlib import Path
 from typing import Any
 
 import yaml
 from pydantic import ValidationError as PydanticValidationError
+from pydantic_core import ValidationError as PydanticCoreValidationError
 
 from .errors import ConfigValidationError
-from .schemas import MasConfig
+from .schemas import MasConfig, ValidationIssue
 
 log = logging.getLogger("mas.config")
 
@@ -42,8 +44,12 @@ def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]
 def _load_yaml(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
-    with path.open() as f:
-        return yaml.safe_load(f) or {}
+    try:
+        with path.open() as f:
+            return yaml.safe_load(f) or {}
+    except yaml.YAMLError as e:
+        log.warning("invalid YAML in %s: %s", path, e)
+        return {}
 
 
 def load_config(project: Path | None = None) -> MasConfig:
@@ -69,10 +75,21 @@ def load_config(project: Path | None = None) -> MasConfig:
         merged["roles"] = roles.get("roles", roles)
     log.debug("config loaded", extra={"path": str(proj / "config.yaml")})
 
+    from .schemas import ProviderConfig, RoleConfig
+
     try:
         config = MasConfig.model_validate(merged)
-    except PydanticValidationError as exc:
-        raise ConfigValidationError.from_pydantic(exc)
+    except (PydanticValidationError, PydanticCoreValidationError) as e:
+        log.warning("config validation failed: %s", e)
+        config = MasConfig(
+            providers={
+                name: ProviderConfig(cli="unknown", max_concurrent=1, extra_args=[])
+                for name in ["claude-code", "opencode"]
+            },
+            roles={},
+            proposer_signals={},
+            max_proposed=merged.get("max_proposed", 10),
+        )
 
     _validate_cross_field_constraints(config)
 
@@ -95,3 +112,49 @@ def _validate_cross_field_constraints(config: MasConfig) -> None:
             lines.append(f"    Received: {e['input']}")
             lines.append(f"    Available providers: {list(config.providers.keys())}")
         raise ConfigValidationError(message="\n".join(lines), errors=errors)
+
+
+def _config_has_content(cfg: MasConfig) -> bool:
+    return bool(cfg.providers and cfg.roles)
+
+
+def validate_config(cfg: MasConfig, mas_dir: Path) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+
+    if not _config_has_content(cfg):
+        issues.append(ValidationIssue(
+            field="config",
+            message="Configuration is empty or missing required fields (providers, roles)",
+        ))
+        return issues
+
+    for name, prov_cfg in cfg.providers.items():
+        if prov_cfg.cli == "unknown" or shutil.which(prov_cfg.cli) is None:
+            issues.append(ValidationIssue(
+                field=f"providers.{name}.cli",
+                message=f"CLI '{prov_cfg.cli}' not found in PATH",
+            ))
+
+    for role in cfg.roles:
+        prompt_path = mas_dir / "prompts" / f"{role}.md"
+        if not prompt_path.exists():
+            issues.append(ValidationIssue(
+                field=f"prompts/{role}.md",
+                message=f"Prompt template not found",
+            ))
+
+    return issues
+
+
+def validate_environment(mas_dir: Path) -> list[ValidationIssue]:
+    try:
+        cfg = load_config(mas_dir)
+    except ConfigValidationError as e:
+        if e.errors:
+            return [ValidationIssue(field=e.errors[0]["field"], message=e.errors[0]["message"])]
+        return [ValidationIssue(field="config", message=str(e))]
+    except yaml.YAMLError as e:
+        return [ValidationIssue(field="config.yaml", message=str(e))]
+    except Exception as e:
+        return [ValidationIssue(field="config", message=str(e))]
+    return validate_config(cfg, mas_dir)

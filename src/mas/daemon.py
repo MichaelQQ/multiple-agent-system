@@ -62,11 +62,17 @@ def start(project: Path, interval_seconds: int = 300) -> int:
 
     Returns the daemon PID. Raises DaemonError if one is already running.
     """
-    from .config import project_dir
+    from .config import project_dir, validate_config
 
     mas = project_dir(project)
     mas.mkdir(parents=True, exist_ok=True)
     (mas / "logs").mkdir(exist_ok=True)
+
+    from .config import load_config as load_cfg
+    cfg = load_cfg(mas)
+    issues = validate_config(cfg, mas)
+    if issues:
+        raise DaemonError("validation failed: " + "; ".join(f"{i.field}: {i.message}" for i in issues))
 
     existing = _read_pid(mas)
     if existing is not None and _pid_alive(existing):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Literal
 
@@ -12,6 +13,13 @@ Status = Literal["success", "failure", "needs_revision"]
 Verdict = Literal["pass", "fail", "needs_revision"]
 
 _TASK_ID_PATTERN = re.compile(r"^\d{8}-[a-zA-Z0-9_-]+-[a-f0-9]{4}$")
+
+
+@dataclass
+class ValidationIssue:
+    """Represents individual validation problem."""
+    field: str
+    message: str
 
 
 def _now() -> datetime:

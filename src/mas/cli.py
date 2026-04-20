@@ -120,6 +120,29 @@ def tick(
 
 
 @app.command()
+def validate(
+    ctx: typer.Context,
+) -> None:
+    """Validate mas configuration and environment."""
+    from .config import load_config, project_dir, validate_config, validate_environment
+
+    if ctx.obj and "mas" in ctx.obj:
+        mas = project_dir(Path(ctx.obj["mas"]))
+    else:
+        mas = project_dir()
+
+    issues = validate_environment(mas)
+
+    if not issues:
+        typer.echo("Validation passed: all providers and prompt templates are available.")
+        raise typer.Exit(0)
+
+    for issue in issues:
+        typer.echo(f"ERROR: {issue.field}: {issue.message}")
+    raise typer.Exit(1)
+
+
+@app.command()
 def show() -> None:
     """Print the current board."""
     mas = project_dir()
@@ -314,11 +337,8 @@ app.add_typer(daemon_app, name="daemon")
 def daemon_start(
     interval: int = typer.Option(300, "--interval", help="Seconds between ticks"),
 ) -> None:
-    try:
-        pid = daemon.start(project_root(), interval_seconds=interval)
-    except daemon.DaemonError as e:
-        typer.echo(str(e))
-        raise typer.Exit(1)
+    proj = project_root()
+    pid = daemon.start(proj, interval_seconds=interval)
     typer.echo(f"daemon started (pid {pid}, interval {interval}s)")
 
 
