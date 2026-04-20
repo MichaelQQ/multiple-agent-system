@@ -9,10 +9,13 @@ import pytest
 
 from mas.errors import PlanParseError
 from mas.roles import (
+    _list_goals,
     _list_proposed_tasks,
     _run,
     _shallow_tree,
+    find_similar_goal,
     gather_proposer_signals,
+    goal_similarity,
     parse_plan,
     render_prompt,
 )
@@ -287,17 +290,13 @@ class TestListProposedTasks:
         mas = tmp_path / ".mas"
         task_dir = mas / "tasks" / "proposed" / "task-123"
         task_dir.mkdir(parents=True)
-        (task_dir / "task.json").write_text(json.dumps({"goal": "Do something"}))
+        (task_dir / "task.json").write_text(json.dumps({
+            "id": "20260101-slug-abcd",
+            "role": "orchestrator",
+            "goal": "Do something",
+        }))
         result = _list_proposed_tasks(mas)
         assert "Do something" in result
-
-    def test_falls_back_to_summary(self, tmp_path):
-        mas = tmp_path / ".mas"
-        task_dir = mas / "tasks" / "proposed" / "task-456"
-        task_dir.mkdir(parents=True)
-        (task_dir / "task.json").write_text(json.dumps({"summary": "Summary text"}))
-        result = _list_proposed_tasks(mas)
-        assert "Summary text" in result
 
     def test_falls_back_to_dirname(self, tmp_path):
         mas = tmp_path / ".mas"
@@ -426,8 +425,111 @@ class TestGatherProposerSignalsIntegration:
         proposed_dir.mkdir(parents=True)
         task_dir = proposed_dir / "task-999"
         task_dir.mkdir()
-        (task_dir / "task.json").write_text(json.dumps({"goal": "Proposed task"}))
+        (task_dir / "task.json").write_text(json.dumps({
+            "id": "20260101-slug-abcd",
+            "role": "orchestrator",
+            "goal": "Proposed task",
+        }))
 
         signals = gather_proposer_signals(tmp_path, mas_root=mas)
         assert "already_proposed" in signals.model_dump()
         assert "Proposed task" in signals.already_proposed
+
+    @patch("mas.roles._run")
+    def test_other_columns_listed(self, mock_run, tmp_path):
+        mock_run.return_value = ""
+        mas = tmp_path / ".mas"
+        for col, goal in [
+            ("doing", "running task"),
+            ("done", "finished task"),
+            ("failed", "broken task"),
+        ]:
+            d = mas / "tasks" / col / f"t-{col}"
+            d.mkdir(parents=True)
+            (d / "task.json").write_text(
+                json.dumps({"id": "20260101-slug-abcd", "role": "orchestrator", "goal": goal})
+            )
+
+        signals = gather_proposer_signals(tmp_path, mas_root=mas)
+        assert "running task" in signals.in_progress
+        assert "finished task" in signals.recently_done
+        assert "broken task" in signals.recently_failed
+
+    @patch("mas.roles._run")
+    def test_proposer_role_tasks_excluded(self, mock_run, tmp_path):
+        """Proposer's own transient tasks must not pollute the 'done' history."""
+        mock_run.return_value = ""
+        mas = tmp_path / ".mas"
+        done = mas / "tasks" / "done"
+        for i, role in enumerate(["proposer", "orchestrator"]):
+            d = done / f"t-{i}"
+            d.mkdir(parents=True)
+            (d / "task.json").write_text(json.dumps({
+                "id": f"2026010{i}-slug-abc{i}",
+                "role": role,
+                "goal": f"goal-{role}",
+            }))
+
+        signals = gather_proposer_signals(tmp_path, mas_root=mas)
+        assert "goal-orchestrator" in signals.recently_done
+        assert "goal-proposer" not in signals.recently_done
+
+
+class TestGoalSimilarity:
+    def test_identical_is_one(self):
+        assert goal_similarity("Build MCP tool", "Build MCP tool") == 1.0
+
+    def test_disjoint_is_zero(self):
+        assert goal_similarity("hello world", "foo bar") == 0.0
+
+    def test_stopwords_ignored(self):
+        # Only "mcp"/"tool" vs "mcp"/"tool" after stopword/short-word filtering.
+        s = goal_similarity(
+            "Create an MCP tool for X",
+            "Build a new MCP tool for Y",
+        )
+        # After filtering: {"mcp", "tool"} vs {"mcp", "tool"} → 1.0
+        assert s == 1.0
+
+    def test_near_duplicate_mcp_proposals(self):
+        a = "Create an MCP tool that returns budget utilization metrics"
+        b = "Create an MCP tool that returns conversion tracking metrics"
+        s = goal_similarity(a, b)
+        assert s >= 0.5
+
+    def test_empty_is_zero(self):
+        assert goal_similarity("", "foo bar baz") == 0.0
+        assert goal_similarity("foo", "") == 0.0
+
+    def test_find_similar_above_threshold(self):
+        existing = ["Fix login bug", "Add dark mode toggle"]
+        hit = find_similar_goal("fix login bug now", existing, threshold=0.6)
+        assert hit is not None
+        assert hit[0] == "Fix login bug"
+
+    def test_find_similar_below_threshold_returns_none(self):
+        existing = ["Fix login bug"]
+        hit = find_similar_goal("refactor database schema", existing, threshold=0.6)
+        assert hit is None
+
+
+class TestListGoals:
+    def test_respects_limit(self, tmp_path):
+        mas = tmp_path / ".mas"
+        done = mas / "tasks" / "done"
+        for i in range(5):
+            d = done / f"t-{i}"
+            d.mkdir(parents=True)
+            (d / "task.json").write_text(json.dumps({
+                "id": f"2026010{i}-slug-ab0{i}",
+                "role": "orchestrator",
+                "goal": f"goal {i}",
+            }))
+
+        goals = _list_goals(mas, "done", limit=3)
+        assert len(goals) == 3
+
+    def test_empty_column_returns_empty(self, tmp_path):
+        mas = tmp_path / ".mas"
+        (mas / "tasks" / "done").mkdir(parents=True)
+        assert _list_goals(mas, "done") == []

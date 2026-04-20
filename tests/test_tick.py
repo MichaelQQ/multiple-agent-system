@@ -51,7 +51,11 @@ from mas.tick import (
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
 
-def _cfg(max_retries: int = 2, max_proposed: int = 10) -> MasConfig:
+def _cfg(
+    max_retries: int = 2,
+    max_proposed: int = 10,
+    proposal_similarity_threshold: float = 0.7,
+) -> MasConfig:
     return MasConfig(
         providers={"mock": ProviderConfig(cli="sh", max_concurrent=2, extra_args=[])},
         roles={
@@ -62,6 +66,7 @@ def _cfg(max_retries: int = 2, max_proposed: int = 10) -> MasConfig:
             "evaluator": RoleConfig(provider="mock", max_retries=max_retries),
         },
         max_proposed=max_proposed,
+        proposal_similarity_threshold=proposal_similarity_threshold,
     )
 
 
@@ -843,6 +848,68 @@ def test_materialize_proposal_respects_max_proposed(tmp_path: Path):
     _materialize_proposal(env, result)
 
     assert not list((mas / "tasks" / "proposed").iterdir())
+
+
+def test_materialize_proposal_drops_duplicate(tmp_path: Path, caplog):
+    """A near-duplicate of an existing goal must not be materialized."""
+    import json as _json
+
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+
+    # Seed an existing proposed task.
+    existing = mas / "tasks" / "proposed" / "20260101-existing-abcd"
+    existing.mkdir(parents=True)
+    (existing / "task.json").write_text(_json.dumps({
+        "id": "20260101-existing-abcd",
+        "role": "orchestrator",
+        "goal": "Create an MCP tool that returns budget utilization metrics",
+    }))
+
+    result = Result(
+        task_id="prop-dup",
+        status="success",
+        summary="dup",
+        handoff={"goal": "Create an MCP tool that returns conversion tracking metrics"},
+    )
+
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg(
+        max_proposed=10, proposal_similarity_threshold=0.5,
+    ))
+
+    with caplog.at_level(logging.INFO):
+        _materialize_proposal(env, result)
+
+    # Only the seed remains; no new task was created.
+    assert len(list((mas / "tasks" / "proposed").iterdir())) == 1
+
+
+def test_materialize_proposal_allows_distinct_goal(tmp_path: Path):
+    """A genuinely different goal still materializes even with existing proposals."""
+    import json as _json
+
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+
+    existing = mas / "tasks" / "proposed" / "20260101-existing-abcd"
+    existing.mkdir(parents=True)
+    (existing / "task.json").write_text(_json.dumps({
+        "id": "20260101-existing-abcd",
+        "role": "orchestrator",
+        "goal": "Create an MCP tool that returns budget utilization metrics",
+    }))
+
+    result = Result(
+        task_id="prop-distinct",
+        status="success",
+        summary="distinct",
+        handoff={"goal": "Refactor worktree pruning to handle detached HEAD"},
+    )
+
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg(max_proposed=10))
+    _materialize_proposal(env, result)
+
+    assert len(list((mas / "tasks" / "proposed").iterdir())) == 2
 
 
 def test_materialize_proposal_handles_missing_goal(tmp_path: Path, caplog):

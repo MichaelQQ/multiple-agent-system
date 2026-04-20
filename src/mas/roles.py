@@ -73,7 +73,10 @@ def gather_proposer_signals(
     signals["repo_scan"] = _shallow_tree(project_root, max_depth=2, max_entries=200)
 
     _mas = mas_root or (project_root / ".mas")
-    signals["already_proposed"] = _list_proposed_tasks(_mas)
+    signals["already_proposed"] = _list_goals(_mas, "proposed")
+    signals["in_progress"] = _list_goals(_mas, "doing")
+    signals["recently_done"] = _list_goals(_mas, "done", limit=30)
+    signals["recently_failed"] = _list_goals(_mas, "failed", limit=20)
 
     log = _run(["git", "-C", str(project_root), "log", f"-{git_log_limit}",
                 "--pretty=format:%h %ad %s", "--date=short"], timeout=15)
@@ -96,17 +99,75 @@ def gather_proposer_signals(
     return ProposerSignals.model_validate(signals)
 
 
-def _list_proposed_tasks(mas_root: Path) -> list[str]:
-    proposed: list[str] = []
-    for task_json in sorted((mas_root / "tasks" / "proposed").glob("*/task.json")):
+def _list_goals(mas_root: Path, column: str, *, limit: int | None = None) -> list[str]:
+    """Return task goals from a board column, filtering out proposer's own
+    bootstrapping tasks (role=proposer). Sorted newest-first by mtime when
+    `limit` is set, else alphabetical."""
+    col_dir = mas_root / "tasks" / column
+    entries = list(col_dir.glob("*/task.json"))
+    if limit is not None:
+        entries.sort(key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
+    else:
+        entries.sort()
+
+    goals: list[str] = []
+    for task_json in entries:
+        if limit is not None and len(goals) >= limit:
+            break
         try:
             data = json.loads(task_json.read_text())
+            known = Task.model_fields.keys()
+            data = {k: v for k, v in data.items() if k in known}
+            task = Task.model_validate(data)
+            if task.role == "proposer":
+                continue
+            goals.append(task.goal or task_json.parent.name)
         except Exception:
-            proposed.append(task_json.parent.name)
-            continue
-        label = data.get("goal") or data.get("summary") or task_json.parent.name
-        proposed.append(label)
-    return proposed
+            goals.append(task_json.parent.name)
+    return goals
+
+
+def _list_proposed_tasks(mas_root: Path) -> list[str]:
+    """Back-compat shim; prefer _list_goals."""
+    return _list_goals(mas_root, "proposed")
+
+
+# --- Goal similarity --------------------------------------------------------
+
+_GOAL_STOPWORDS = frozenset({
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in", "is",
+    "it", "of", "on", "or", "that", "the", "to", "with", "add", "implement",
+    "create", "build", "make", "new", "task", "feature",
+})
+
+
+def _goal_tokens(goal: str) -> set[str]:
+    import re as _re
+    words = _re.findall(r"[A-Za-z0-9_]+", goal.lower())
+    return {w for w in words if len(w) > 2 and w not in _GOAL_STOPWORDS}
+
+
+def goal_similarity(a: str, b: str) -> float:
+    """Jaccard similarity of normalized goal tokens. 0.0 if either is empty."""
+    ta, tb = _goal_tokens(a), _goal_tokens(b)
+    if not ta or not tb:
+        return 0.0
+    inter = len(ta & tb)
+    union = len(ta | tb)
+    return inter / union if union else 0.0
+
+
+def find_similar_goal(
+    new_goal: str, existing: list[str], *, threshold: float = 0.7
+) -> tuple[str, float] | None:
+    """Return (goal, score) of the closest existing goal at or above threshold,
+    else None."""
+    best: tuple[str, float] | None = None
+    for g in existing:
+        s = goal_similarity(new_goal, g)
+        if s >= threshold and (best is None or s > best[1]):
+            best = (g, s)
+    return best
 
 
 def _shallow_tree(root: Path, *, max_depth: int, max_entries: int) -> str:

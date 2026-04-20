@@ -431,6 +431,7 @@ def test_materialize_proposal_empty_handoff_skips(mas: Path):
 
     class FakeCfg:
         max_proposed = 10
+        proposal_similarity_threshold = 0.7
 
     env = type("TickEnv", (), {"cfg": FakeCfg(), "mas": mas})()
 
