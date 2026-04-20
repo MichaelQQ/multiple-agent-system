@@ -175,7 +175,7 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
         return
 
     child_task = Task(
-        id=next_child.id,
+        id=new_task_id(next_child.goal, salt=next_child.id),
         parent_id=parent_task.id,
         role=next_child.role,
         goal=next_child.goal,
