@@ -127,6 +127,9 @@ class ProposerSignals(BaseModel):
 
     repo_scan: str = ""
     already_proposed: list[str] = Field(default_factory=list)
+    in_progress: list[str] = Field(default_factory=list)
+    recently_done: list[str] = Field(default_factory=list)
+    recently_failed: list[str] = Field(default_factory=list)
     git_log: str = ""
     recent_diffs: str = ""
     ideas: str = ""
@@ -149,6 +152,7 @@ class MasConfig(BaseModel):
     roles: dict[Role, RoleConfig]
     proposer_signals: dict[str, Any] = Field(default_factory=dict)
     max_proposed: int = 10
+    proposal_similarity_threshold: float = 0.7
 
     @field_validator("proposer_signals", mode="before")
     @classmethod

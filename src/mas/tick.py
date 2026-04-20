@@ -15,7 +15,7 @@ from .adapters import get_adapter
 from .config import load_config, project_root, project_dir
 from .ids import task_id as new_task_id
 from .logging import get_task_logger
-from .roles import gather_proposer_signals, parse_plan, render_prompt
+from .roles import _list_goals, find_similar_goal, gather_proposer_signals, parse_plan, render_prompt
 from .schemas import BaseModel, ConfigDict, MasConfig, Plan, ProposalHandoff, Result, Role, Task
 
 log = logging.getLogger("mas.tick")
@@ -396,6 +396,17 @@ def _materialize_proposal(env: TickEnv, result: Result) -> None:
         tlog.warning("no goal in handoff, skipping materialization")
         return
     if len(board.list_column(env.mas, "proposed")) >= env.cfg.max_proposed:
+        return
+
+    existing_goals = (
+        _list_goals(env.mas, "proposed")
+        + _list_goals(env.mas, "doing")
+        + _list_goals(env.mas, "done", limit=50)
+        + _list_goals(env.mas, "failed", limit=20)
+    )
+    hit = find_similar_goal(goal, existing_goals, threshold=env.cfg.proposal_similarity_threshold)
+    if hit is not None:
+        tlog.info("dropping duplicate proposal (jaccard=%.2f vs %r): %r", hit[1], hit[0], goal)
         return
 
     inputs: dict = {}

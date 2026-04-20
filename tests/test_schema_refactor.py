@@ -68,6 +68,9 @@ class TestProposerSignals:
         ps = ProposerSignals()
         assert ps.repo_scan == ""
         assert ps.already_proposed == []
+        assert ps.in_progress == []
+        assert ps.recently_done == []
+        assert ps.recently_failed == []
         assert ps.git_log == ""
         assert ps.recent_diffs == ""
         assert ps.ideas == ""
