@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `MAS_OLLAMA_TIMEOUT` environment variable (default: 3600s) for controlling HTTP request timeout to the Ollama API.
 - E2E test suite (`tests/e2e/test_lifecycle.py`) covering full lifecycle scenarios, revision cycles, failure recovery, worktree lifecycle, and prior_results propagation. Run with `pytest tests/e2e/ -q`.
+- Script-adapter-driven E2E tests (`tests/e2e/test_lifecycle_script.py` plus `tests/e2e/conftest.py` and `tests/e2e/scripts/`) that exercise the full MAS task lifecycle from proposed → doing → done using real subprocesses, validating state transitions, schema compliance, transitions.jsonl logging, and Git worktree management.
+- **Script Provider Adapter**: New `script` provider adapter (`src/mas/adapters/script_adapter.py`) that executes shell scripts as detached subprocesses. Accepts script path via `--script` extra_args and receives `$MAS_ROLE` and `$MAS_TASK_DIR` environment variables.
 - `ProposalHandoff` model in `src/mas/schemas.py` for typed proposer handoffs
 - `board.read_plan()` helper to read and validate `plan.json` files
 - `Task.id` field validation against pattern `{yyyymmdd}-{slug}-{hash4}`
@@ -31,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `read_task()` in `board.py` now wraps JSON parsing and validation errors with `TaskReadError`, including file path and content snippet
 - `read_result()` in `board.py` now wraps JSON parsing and validation errors with `ResultReadError`, including file path and content snippet
 - Error messages now include the file path, a snippet of the problematic content, and the original exception type and message
+- RoleConfig schema now accepts `extra_args` field for passing additional arguments to provider adapters.
+- Tick loop now automatically promotes proposed tasks to doing when workers are available.
 
 ### Fixed
 

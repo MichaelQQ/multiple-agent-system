@@ -21,6 +21,10 @@ PROJECT_DIR_NAME = ".mas"
 
 def project_root(start: Path | None = None) -> Path:
     start = (start or Path.cwd()).resolve()
+    if (start / ".git").is_dir():
+        for p in [start, start.parent, *start.parents]:
+            if (p / PROJECT_DIR_NAME).is_dir():
+                return p
     for p in [start, *start.parents]:
         if (p / PROJECT_DIR_NAME).is_dir():
             return p

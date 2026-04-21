@@ -111,6 +111,7 @@ class RoleConfig(BaseModel):
     max_retries: int = 2
     allowed_tools: list[str] | None = None
     permission_mode: str | None = None
+    extra_args: list[str] = Field(default_factory=list)
 
 
 class ProviderConfig(BaseModel):

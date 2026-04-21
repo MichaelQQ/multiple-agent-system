@@ -7,6 +7,7 @@ from .gemini_cli import GeminiCliAdapter
 from .ollama import OllamaAdapter
 from .opencode import OpenCodeAdapter
 from .mock import MockAdapter
+from .script_adapter import ScriptAdapter
 
 REGISTRY: dict[str, type[Adapter]] = {
     "claude-code": ClaudeCodeAdapter,
@@ -15,6 +16,7 @@ REGISTRY: dict[str, type[Adapter]] = {
     "ollama": OllamaAdapter,
     "opencode": OpenCodeAdapter,
     "mock": MockAdapter,
+    "script": ScriptAdapter,
 }
 
 
