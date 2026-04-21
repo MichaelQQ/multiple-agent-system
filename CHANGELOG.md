@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `MAS_OLLAMA_TIMEOUT` environment variable (default: 3600s) for controlling HTTP request timeout to the Ollama API.
+- E2E test suite (`tests/e2e/test_lifecycle.py`) covering full lifecycle scenarios, revision cycles, failure recovery, worktree lifecycle, and prior_results propagation. Run with `pytest tests/e2e/ -q`.
 - `ProposalHandoff` model in `src/mas/schemas.py` for typed proposer handoffs
 - `board.read_plan()` helper to read and validate `plan.json` files
 - `Task.id` field validation against pattern `{yyyymmdd}-{slug}-{hash4}`

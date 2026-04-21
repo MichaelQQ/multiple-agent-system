@@ -181,15 +181,31 @@ rendered with `string.Template.safe_substitute` before dispatch.
 ## Tests
 
 ```sh
-.venv/bin/pytest -q
+.venv/bin/pytest -q                                          # all tests
+.venv/bin/pytest tests/e2e/ -q                               # E2E tests only
 ```
 
-Unit tests cover schemas, board moves, PID counter, previous-failure
-injection, id generator.
+### Test layers
 
-See [TESTING_STRATEGY.md](TESTING_STRATEGY.md) for the full testing approach,
-including test layers (Unit/Integration/E2E), component mapping, and mocking
-guidance.
+- **Unit** (`tests/test_*.py`): Schemas, board moves, PID counter, previous-failure injection, id generator.
+- **Integration** (`tests/integration/`): Board and tick interactions with mocked adapters.
+- **E2E** (`tests/e2e/`): Full lifecycle scenarios using a real `.mas` directory with config/roles, real tick loop and board operations, but mocked adapter dispatch.
+
+### E2E test coverage
+
+The E2E suite (`tests/e2e/test_lifecycle.py`) contains 8 tests covering:
+
+| Test class | Coverage |
+|------------|----------|
+| `TestHappyPathLifecycle` | Happy path: proposal → orchestration → implementation → testing → evaluation → done. Board transitions. |
+| `TestRevisionCycleLifecycle` | Revision cycles bounded by `max_revision_cycles`, feedback propagation from evaluator to implementer. |
+| `TestFailureRecovery` | Subtask max_retries moves parent to `failed/`. |
+| `TestWorktreeLifecycle` | Git worktree created on orchestration, pruned on done. |
+| `TestPriorResultsPropagation` | Prior results injected into implementer's `task.json`. |
+
+All E2E tests use a real `.mas` directory with `config.yaml`/`roles.yaml`, real tick loop and board operations, but mock adapter dispatch calls to simulate agent output.
+
+See [TESTING_STRATEGY.md](TESTING_STRATEGY.md) for the full testing approach.
 
 ## Scope of v1
 
