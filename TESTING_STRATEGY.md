@@ -117,6 +117,7 @@ def test_process_check(mock_kill):
 | `test_ollama.py` | Integration | Integration |
 | `test_orphan.py` | Integration | Integration |
 | `test_retry_marker.py` | Integration | Integration |
+| `tests/e2e/test_lifecycle.py` | E2E | E2E |
 
 ## Test Organization Conventions
 
