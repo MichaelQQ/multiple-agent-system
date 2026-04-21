@@ -92,17 +92,8 @@ EOF
         assert txn[0].from_state == "none"
         assert txn[0].to_state == "proposed"
 
-        doing_dir = None
-        for _ in range(30):
-            tick.run_tick(start=git_repo)
-            col, task_path = board.find_task(mas_dir, task_id)
-            if col == "doing":
-                doing_dir = task_path
-                break
-            time.sleep(0.2)
-
-        assert doing_dir is not None
-        assert doing_dir.parent.name == "doing"
+        doing_dir = board.task_dir(mas_dir, "doing", task_id)
+        board.move(proposed_dir, doing_dir, reason="manual_promote")
 
         txn = transitions.read_transitions(doing_dir)
         state_changes = [(t.from_state, t.to_state) for t in txn]
@@ -111,6 +102,11 @@ EOF
         )
 
         wt_path = doing_dir / "worktree"
+        for _ in range(30):
+            tick.run_tick(start=git_repo)
+            if wt_path.exists():
+                break
+            time.sleep(0.2)
         assert wt_path.exists()
 
         branch_name = wt.branch_name(task_id)
@@ -170,16 +166,15 @@ EOF
         proposed_dir = board.task_dir(mas_dir, "proposed", task_id)
         board.write_task(proposed_dir, task)
 
-        doing_dir = None
+        doing_dir = board.task_dir(mas_dir, "doing", task_id)
+        board.move(proposed_dir, doing_dir, reason="manual_promote")
+
         for _ in range(30):
             tick.run_tick(start=git_repo)
-            col, task_path = board.find_task(mas_dir, task_id)
-            if col == "doing":
-                doing_dir = task_path
+            wt_path = doing_dir / "worktree"
+            if wt_path.exists():
                 break
             time.sleep(0.2)
-
-        assert doing_dir is not None
 
         wt_path = doing_dir / "worktree"
         assert wt_path.exists(), "Worktree must exist during doing/"
@@ -291,12 +286,13 @@ class TestFullIntegration:
         proposed_dir = board.task_dir(mas_dir, "proposed", task_id)
         board.write_task(proposed_dir, task)
 
+        doing_dir = board.task_dir(mas_dir, "doing", task_id)
+        board.move(proposed_dir, doing_dir, reason="manual_promote")
+
         for _ in range(30):
             tick.run_tick(start=git_repo)
-            col, task_path = board.find_task(mas_dir, task_id)
-            if col == "doing":
-                wt_path = task_path / "worktree"
-                assert wt_path.exists()
+            wt_path = doing_dir / "worktree"
+            if wt_path.exists():
                 branch = wt.branch_name(task_id)
                 result = subprocess.run(
                     ["git", "-C", str(git_repo), "branch", "--list"],
@@ -307,7 +303,7 @@ class TestFullIntegration:
                 break
             time.sleep(0.2)
         else:
-            pytest.fail("Task never reached doing/ state")
+            pytest.fail("Worktree was never created")
 
     def test_tick_finalizes_and_prunes_worktree(
         self, git_repo: Path, mas_dir: Path, tmp_path
@@ -333,6 +329,9 @@ EOF
         task = Task(id=task_id, role="orchestrator", goal="Prune test")
         proposed_dir = board.task_dir(mas_dir, "proposed", task_id)
         board.write_task(proposed_dir, task)
+
+        doing_dir = board.task_dir(mas_dir, "doing", task_id)
+        board.move(proposed_dir, doing_dir, reason="manual_promote")
 
         for _ in range(60):
             tick.run_tick(start=git_repo)

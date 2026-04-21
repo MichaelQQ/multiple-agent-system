@@ -73,22 +73,10 @@ def run_tick(*, start: Path | None = None) -> None:
 
     try:
         _reap_workers(env)
-        _advance_proposed(env)
         _advance_doing(env)
         _maybe_dispatch_proposer(env)
     finally:
         lock.close()
-
-
-# --- 1a. Promote ------------------------------------------------------------
-
-
-def _advance_proposed(env: TickEnv) -> None:
-    proposed = list(board.list_column(env.mas, "proposed"))
-    for proposed_dir in proposed:
-        doing_dir = env.mas / "tasks" / "doing" / proposed_dir.name
-        if not doing_dir.exists():
-            board.move(proposed_dir, doing_dir, reason="auto_promote")
 
 
 def _reap_workers(env: TickEnv) -> None:

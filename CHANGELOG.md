@@ -34,7 +34,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `read_result()` in `board.py` now wraps JSON parsing and validation errors with `ResultReadError`, including file path and content snippet
 - Error messages now include the file path, a snippet of the problematic content, and the original exception type and message
 - RoleConfig schema now accepts `extra_args` field for passing additional arguments to provider adapters.
-- Tick loop now automatically promotes proposed tasks to doing when workers are available.
 
 ### Fixed
 
