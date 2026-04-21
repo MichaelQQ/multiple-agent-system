@@ -140,6 +140,52 @@ rendered with `string.Template.safe_substitute` before dispatch.
 Unit tests cover schemas, board moves, PID counter, previous-failure
 injection, id generator.
 
+### E2E Tests
+
+The E2E test suite (`tests/e2e/`) exercises the full MAS task lifecycle from
+proposed → doing → done. It validates:
+
+- Task lifecycle transitions and state machine behavior
+- Schema validation of task.json and result.json
+- transitions.jsonl logging
+- Git worktree creation and pruning
+
+Run E2E tests:
+
+```sh
+.venv/bin/pytest tests/e2e/ -v
+```
+
+#### Script Adapter
+
+The **script adapter** (`script` provider) is a special adapter that executes
+shell scripts as subprocesses instead of invoking AI agents. It's primarily
+used for E2E testing but can also run simple automation scripts.
+
+Configuration example in `.mas/roles.yaml`:
+
+```yaml
+proposer:
+  provider: script
+  extra_args:
+    - --script
+    - path/to/script.sh
+```
+
+The adapter receives `$MAS_ROLE` and `$MAS_TASK_DIR` environment variables and
+must write `result.json` to `$MAS_TASK_DIR` before exiting.
+
+#### Adding New E2E Scenarios
+
+To add a new E2E test scenario:
+
+1. Create shell scripts for the roles you need in `tests/e2e/scripts/`
+2. Each script must write a valid `result.json` to `$MAS_TASK_DIR`
+3. Add test cases in `tests/e2e/test_lifecycle.py` that use the script provider
+4. Run `.venv/bin/pytest tests/e2e/ -v` to verify
+
+See `tests/e2e/scripts/` for examples of role scripts.
+
 ## Scope of v1
 
 Implemented: init, tick, show, promote, retry, logs, cron install/uninstall/

@@ -48,8 +48,12 @@ def _acquire_lock(mas_dir: Path):
 
 
 def run_tick(*, start: Path | None = None) -> None:
-    repo = project_root(start)
+    project_root_path = project_root(start)
     mas = project_dir(start)
+    if start is not None and (start / ".git").is_dir():
+        repo = start
+    else:
+        repo = project_root_path
     cfg = load_config(mas)
     env = TickEnv(repo=repo, mas=mas, cfg=cfg)
     board.ensure_layout(mas)
@@ -62,13 +66,22 @@ def run_tick(*, start: Path | None = None) -> None:
 
     try:
         _reap_workers(env)
+        _advance_proposed(env)
         _advance_doing(env)
         _maybe_dispatch_proposer(env)
     finally:
         lock.close()
 
 
-# --- 1. Reap ----------------------------------------------------------------
+# --- 1a. Promote ------------------------------------------------------------
+
+
+def _advance_proposed(env: TickEnv) -> None:
+    proposed = list(board.list_column(env.mas, "proposed"))
+    for proposed_dir in proposed:
+        doing_dir = env.mas / "tasks" / "doing" / proposed_dir.name
+        if not doing_dir.exists():
+            board.move(proposed_dir, doing_dir, reason="auto_promote")
 
 
 def _reap_workers(env: TickEnv) -> None:
