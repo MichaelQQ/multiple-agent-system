@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .base import Adapter, DispatchHandle
+from .base import Adapter, AdapterUnavailableError, DispatchHandle
 from .claude_code import ClaudeCodeAdapter
 from .codex import CodexAdapter
 from .gemini_cli import GeminiCliAdapter
@@ -26,4 +26,4 @@ def get_adapter(name: str) -> type[Adapter]:
     return REGISTRY[name]
 
 
-__all__ = ["Adapter", "DispatchHandle", "get_adapter", "REGISTRY"]
+__all__ = ["Adapter", "AdapterUnavailableError", "DispatchHandle", "get_adapter", "REGISTRY"]

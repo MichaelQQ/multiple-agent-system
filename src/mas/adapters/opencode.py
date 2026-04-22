@@ -9,6 +9,10 @@ class OpenCodeAdapter(Adapter):
     name = "opencode"
     agentic = True
 
+    def health_check(self) -> bool:
+        cli = self.provider_cfg.cli or "opencode"
+        return self._check_cli_responsive(cli, ["--version"])
+
     def build_command(self, prompt: str, task_dir: Path, cwd: Path) -> list[str]:
         cli = self.provider_cfg.cli or "opencode"
         args: list[str] = [cli, "run", prompt]

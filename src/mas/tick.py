@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Iterable
 
 from . import board, transitions, worktree
-from .adapters import get_adapter
+from .adapters import AdapterUnavailableError, get_adapter
 from .config import load_config, project_root, project_dir, validate_config
 from .ids import task_id as new_task_id
 from .logging import get_task_logger
@@ -555,12 +555,30 @@ def _dispatch_role(
     log_path = task_dir / "logs" / f"{role}-{attempt}.log"
 
     stdin_text = prompt if not adapter.agentic else None
-    handle = adapter.dispatch(
-        prompt=prompt,
-        task_dir=task_dir,
-        cwd=cwd,
-        log_path=log_path,
-        role=role,
-        stdin_text=stdin_text,
-    )
+    try:
+        handle = adapter.dispatch(
+            prompt=prompt,
+            task_dir=task_dir,
+            cwd=cwd,
+            log_path=log_path,
+            role=role,
+            stdin_text=stdin_text,
+        )
+    except AdapterUnavailableError as e:
+        result = Result(
+            task_id=task.id,
+            status="failure",
+            summary=str(e),
+            artifacts=[],
+            handoff=None,
+            verdict=None,
+            feedback=None,
+            tokens_in=None,
+            tokens_out=None,
+            duration_s=0.0,
+            cost_usd=None,
+        )
+        (task_dir / "result.json").write_text(result.model_dump_json(indent=2))
+        board.move(task_dir, env.mas / "tasks" / "failed" / task.id, reason="adapter_unavailable")
+        return
     board.write_pid(task_dir / "pids", role, role_cfg.provider, handle.pid)

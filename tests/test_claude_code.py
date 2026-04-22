@@ -152,6 +152,7 @@ def test_dispatch_sets_mas_role_env_var(tmp_path, monkeypatch):
     monkeypatch.setattr("subprocess.Popen", MockPopen)
 
     adapter = _adapter()
+    monkeypatch.setattr(adapter, "health_check", lambda: True)
     cwd = tmp_path / "worktree"
     task_dir = tmp_path / "task-abc"
     log_path = task_dir / "logs" / "test.log"
@@ -179,6 +180,7 @@ def test_dispatch_sets_mas_task_dir_env_var(tmp_path, monkeypatch):
     monkeypatch.setattr("subprocess.Popen", MockPopen)
 
     adapter = _adapter()
+    monkeypatch.setattr(adapter, "health_check", lambda: True)
     cwd = tmp_path / "worktree"
     task_dir = tmp_path / "task-abc"
     log_path = task_dir / "logs" / "test.log"
@@ -203,6 +205,7 @@ def test_dispatch_returns_dispatch_handle(tmp_path, monkeypatch):
     monkeypatch.setattr("subprocess.Popen", MockPopen)
 
     adapter = _adapter()
+    monkeypatch.setattr(adapter, "health_check", lambda: True)
     cwd = tmp_path / "worktree"
     task_dir = tmp_path / "task-abc"
     log_path = task_dir / "logs" / "test.log"
@@ -239,6 +242,7 @@ def test_env_strips_vscode_prefixes(tmp_path, monkeypatch):
     monkeypatch.setattr("subprocess.Popen", MockPopen)
 
     adapter = _adapter()
+    monkeypatch.setattr(adapter, "health_check", lambda: True)
     cwd = tmp_path / "worktree"
     task_dir = tmp_path / "task-abc"
     log_path = task_dir / "logs" / "test.log"
@@ -270,6 +274,7 @@ def test_env_preserves_claude_code_prefixes(tmp_path, monkeypatch):
     monkeypatch.setattr("subprocess.Popen", MockPopen)
 
     adapter = _adapter()
+    monkeypatch.setattr(adapter, "health_check", lambda: True)
     cwd = tmp_path / "worktree"
     task_dir = tmp_path / "task-abc"
     log_path = task_dir / "logs" / "test.log"

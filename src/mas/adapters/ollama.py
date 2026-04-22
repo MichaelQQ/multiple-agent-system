@@ -29,6 +29,10 @@ class OllamaAdapter(Adapter):
     name = "ollama"
     agentic = False
 
+    def health_check(self) -> bool:
+        cli = self.provider_cfg.cli or "ollama"
+        return self._check_cli_responsive(cli, ["--version"])
+
     def build_command(self, prompt: str, task_dir: Path, cwd: Path) -> list[str]:
         cli = self.provider_cfg.cli or "ollama"
         model = self.role_cfg.model or "gemma4:e4b"
@@ -50,6 +54,10 @@ class OllamaAdapter(Adapter):
         role: str,
         stdin_text: str | None = None,
     ) -> DispatchHandle:
+        if not self.health_check():
+            message = self._last_health_error or f"{self.provider_cfg.cli} is unavailable"
+            from .base import AdapterUnavailableError
+            raise AdapterUnavailableError(message)
         cli = self.provider_cfg.cli or "ollama"
         model = self.role_cfg.model or "gemma4:e4b"
         extra = list(self.provider_cfg.extra_args)

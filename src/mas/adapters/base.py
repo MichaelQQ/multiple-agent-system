@@ -3,6 +3,7 @@ from __future__ import annotations
 import abc
 import logging
 import os
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +22,10 @@ class DispatchHandle:
     log_path: Path
 
 
+class AdapterUnavailableError(RuntimeError):
+    pass
+
+
 class Adapter(abc.ABC):
     """Given a task workspace, launch the provider CLI as a detached subprocess.
 
@@ -35,9 +40,14 @@ class Adapter(abc.ABC):
     def __init__(self, provider_cfg: ProviderConfig, role_cfg: RoleConfig) -> None:
         self.provider_cfg = provider_cfg
         self.role_cfg = role_cfg
+        self._last_health_error: str | None = None
 
     @abc.abstractmethod
     def build_command(self, prompt: str, task_dir: Path, cwd: Path) -> list[str]: ...
+
+    def health_check(self) -> bool:
+        cli = self.provider_cfg.cli or self.name
+        return self._check_cli_responsive(cli, ["--version"])
 
     def dispatch(
         self,
@@ -48,6 +58,9 @@ class Adapter(abc.ABC):
         role: str,
         stdin_text: str | None = None,
     ) -> DispatchHandle:
+        if not self.health_check():
+            message = self._last_health_error or f"{self.provider_cfg.cli} is unavailable"
+            raise AdapterUnavailableError(message)
         cmd = self.build_command(prompt, task_dir, cwd)
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_fh = log_path.open("ab")
@@ -96,3 +109,32 @@ class Adapter(abc.ABC):
             if any(key == p or key.startswith(p) for p in self._STRIP_ENV_PREFIXES):
                 del env[key]
         return env
+
+    def _check_cli_responsive(
+        self,
+        cli: str,
+        version_args: list[str],
+        *,
+        timeout_s: int = 5,
+    ) -> bool:
+        cli_path = shutil.which(cli)
+        if cli_path is None:
+            self._last_health_error = f"{cli} not found in PATH"
+            return False
+        try:
+            proc = subprocess.run(
+                [cli, *version_args],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=timeout_s,
+                check=False,
+                env=self._env(),
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            self._last_health_error = f"{cli} is not responsive: {exc}"
+            return False
+        if proc.returncode != 0:
+            self._last_health_error = f"{cli} is not responsive (exit code {proc.returncode})"
+            return False
+        self._last_health_error = None
+        return True
