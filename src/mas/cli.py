@@ -450,6 +450,41 @@ def tail(
         proc.wait()
 
 
+@app.command()
+def audit(
+    task_id: str,
+    role: str | None = typer.Option(None, "--role", help="Filter events by role"),
+    status: str | None = typer.Option(None, "--status", help="Filter events by status"),
+    since: str | None = typer.Option(None, "--since", help="Show events at or after this ISO timestamp"),
+    until: str | None = typer.Option(None, "--until", help="Show events at or before this ISO timestamp"),
+) -> None:
+    """Display a formatted audit timeline for a task and its subtasks."""
+    from . import audit as _audit
+
+    mas = project_dir()
+    located = board.find_task(mas, task_id)
+    if located is None:
+        typer.echo(f"task not found: {task_id}")
+        raise typer.Exit(1)
+
+    _, tdir = located
+    events = _audit.read_events(tdir, role=role, status=status, since=since, until=until)
+
+    table = Table("timestamp", "event", "role", "provider", "subtask_id", "status", "duration_s", "summary")
+    for e in events:
+        table.add_row(
+            (e.get("timestamp") or "")[:19],
+            e.get("event") or "",
+            e.get("role") or "",
+            e.get("provider") or "",
+            e.get("subtask_id") or "",
+            e.get("status") or "",
+            str(e["duration_s"]) if e.get("duration_s") is not None else "",
+            e.get("summary") or "",
+        )
+    console.print(table)
+
+
 cron_app = typer.Typer(no_args_is_help=True, help="Cron schedule for `mas tick`.")
 app.add_typer(cron_app, name="cron")
 

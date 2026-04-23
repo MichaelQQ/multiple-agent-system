@@ -50,7 +50,46 @@ mas show                      # print the board
 mas promote <id>              # proposed/  → doing/  (human approval gate)
 mas retry   <id>              # failed/    → doing/
 mas logs    <id> [-f]         # tail the latest worker log
+mas audit   <id>              # display structured audit timeline for a task
 ```
+
+### Observability
+
+Every board move, subtask dispatch, and completion is appended to `{task_dir}/audit.jsonl`.
+Use `mas audit <id>` to view it as a Rich table:
+
+```sh
+mas audit <id>                         # all events for a task
+mas audit <id> --role implementer      # filter by role
+mas audit <id> --status success        # filter by status
+mas audit <id> --since 2026-04-20T00:00:00Z --until 2026-04-21T00:00:00Z
+```
+
+`mas logs <id>` and `mas tail` show raw subprocess output; `mas audit` shows
+the structured event timeline emitted by the tick loop itself.
+
+#### `audit.jsonl` format
+
+Each line is a JSON object with the following fields:
+
+| Field         | Type             | Description                                                   |
+|---------------|------------------|---------------------------------------------------------------|
+| `timestamp`   | ISO-8601 UTC     | When the event was recorded                                   |
+| `event`       | string           | One of `dispatch`, `completion`, `state_transition`           |
+| `role`        | string \| null   | Role that triggered the event (e.g. `implementer`)            |
+| `provider`    | string \| null   | Provider CLI used (e.g. `claude-code`, `ollama`)              |
+| `task_id`     | string           | Parent task ID                                                |
+| `subtask_id`  | string \| null   | Child subtask ID (set for `dispatch` and `completion` events) |
+| `status`      | string \| null   | Outcome status (e.g. `success`, `failure`, `needs_revision`)  |
+| `duration_s`  | float \| null    | Wall-clock seconds for the event (set on `completion`)        |
+| `summary`     | string           | Human-readable description                                    |
+| `details`     | object           | Extra key/value context (may be empty `{}`)                   |
+
+Event types:
+
+- **`dispatch`** — a subtask was dispatched to a provider. Written to the *parent* task's `audit.jsonl`.
+- **`completion`** — a subtask result was reaped (success, failure, or needs_revision). Written to the *parent* task's `audit.jsonl`.
+- **`state_transition`** — the parent task moved between board columns (`proposed → doing`, `doing → done`, etc.).
 
 ### Validation
 
@@ -143,6 +182,7 @@ projects can each install their own schedule without colliding.
     proposed/{id}/task.json
     doing/{id}/
       task.json  plan.json  worktree/  pids/{role}.{provider}.pid
+      audit.jsonl
       logs/{role}-{n}.log
       subtasks/{child}/{task.json, result.json, logs/, pids/}
     done/{id}/   failed/{id}/

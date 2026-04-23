@@ -10,7 +10,7 @@ import subprocess
 from pathlib import Path
 from typing import Iterable
 
-from . import board, transitions, worktree
+from . import audit, board, transitions, worktree
 from .adapters import AdapterUnavailableError, get_adapter
 from .config import load_config, project_root, project_dir, validate_config
 from .ids import task_id as new_task_id
@@ -191,6 +191,15 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
         attempt=child_attempt,
     )
     _dispatch_role(env, child_task, child_dir, wt, role=next_child.role)
+    audit.append_event(
+        parent_dir,
+        event="dispatch",
+        task_id=parent_task.id,
+        role=next_child.role,
+        provider=env.cfg.roles[next_child.role].provider,
+        subtask_id=next_child.id,
+        summary=f"dispatched {next_child.role}",
+    )
 
 
 def _collect_prior_results(plan: Plan, current_id: str, subtasks_root: Path) -> list[Result]:
@@ -345,6 +354,17 @@ def _all_children_passed(plan: Plan, subtasks_root: Path) -> bool:
 
 
 def _handle_child_result(env, parent_dir, parent_task, plan, spec, result):
+    audit.append_event(
+        parent_dir,
+        event="completion",
+        task_id=parent_task.id,
+        role=spec.role,
+        provider=env.cfg.roles[spec.role].provider,
+        subtask_id=spec.id,
+        status=result.status,
+        duration_s=result.duration_s,
+        summary=result.summary,
+    )
     child_dir = parent_dir / "subtasks" / spec.id
     txns = transitions.read_transitions(child_dir, limit=3)
     if txns:
