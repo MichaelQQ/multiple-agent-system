@@ -201,10 +201,16 @@ def validate(
 
 
 @app.command()
-def show() -> None:
-    """Print the current board."""
+def show(
+    task_id: str = typer.Argument(None, help="If given, render the subtask tree for this task"),
+) -> None:
+    """Print the current board, or a task's subtask tree when an id is given."""
     mas = project_dir()
-    table = Table("column", "id", "role", "goal", "recent transitions")
+    if task_id:
+        _show_task_tree(mas, task_id)
+        return
+
+    table = Table("column", "id", "role", "goal", "progress", "recent transitions")
     for col in board.COLUMNS:
         for d in board.list_column(mas, col):
             try:
@@ -213,13 +219,96 @@ def show() -> None:
             except Exception:
                 t = None
                 goal = "?"
+            progress = _subtask_progress(d) if col == "doing" else ""
             txns = transitions.read_transitions(d, limit=5)
             txn_str = "\n".join(
                 f"{_fmt_local_time(x.timestamp)} {x.from_state}→{x.to_state} ({x.reason})"
                 for x in txns
             ) if txns else ""
-            table.add_row(col, d.name, t.role if t else "?", goal, txn_str)
+            table.add_row(col, d.name, t.role if t else "?", goal, progress, txn_str)
     console.print(table)
+
+
+def _subtask_status(child_dir: Path) -> str:
+    r = board.read_result(child_dir)
+    if r is None:
+        return "pending"
+    if r.status == "success":
+        if r.verdict == "pass":
+            return "pass"
+        if r.verdict in ("fail", "needs_revision"):
+            return r.verdict
+        return "success"
+    return r.status
+
+
+def _subtask_progress(parent_dir: Path) -> str:
+    """Compact status counts for the subtasks under a parent task, e.g. '2 pass, 1 pending'."""
+    plan_path = parent_dir / "plan.json"
+    if not plan_path.exists():
+        return "orchestrator"
+    try:
+        plan = board.read_plan(parent_dir)
+    except Exception:
+        return "?"
+    subs = parent_dir / "subtasks"
+    counts: dict[str, int] = {}
+    for spec in plan.subtasks:
+        s = _subtask_status(subs / spec.id)
+        counts[s] = counts.get(s, 0) + 1
+    order = ["pass", "success", "pending", "needs_revision", "environment_error", "failure", "fail"]
+    parts = [f"{counts[k]} {k}" for k in order if counts.get(k)]
+    for k, v in counts.items():
+        if k not in order:
+            parts.append(f"{v} {k}")
+    return ", ".join(parts) or "empty"
+
+
+def _show_task_tree(mas: Path, task_id: str) -> None:
+    from rich.tree import Tree
+
+    located = board.find_task(mas, task_id)
+    if located is None:
+        typer.echo(f"not found: {task_id}")
+        raise typer.Exit(1)
+    col, tdir = located
+    try:
+        t = board.read_task(tdir)
+    except Exception:
+        typer.echo(f"cannot read task: {task_id}")
+        raise typer.Exit(1)
+
+    root = Tree(f"[bold]{task_id}[/bold]  ({col}, {t.role})  {t.goal[:80]}")
+    result = board.read_result(tdir)
+    if result is not None:
+        root.add(f"result: [cyan]{result.status}[/cyan]  {result.summary[:100]}")
+
+    plan_path = tdir / "plan.json"
+    if plan_path.exists():
+        try:
+            plan = board.read_plan(tdir)
+        except Exception:
+            plan = None
+        if plan is not None:
+            for spec in plan.subtasks:
+                child_dir = tdir / "subtasks" / spec.id
+                status = _subtask_status(child_dir)
+                color = {
+                    "pass": "green", "success": "green",
+                    "pending": "yellow",
+                    "needs_revision": "magenta",
+                    "fail": "red", "failure": "red",
+                    "environment_error": "bright_black",
+                }.get(status, "white")
+                label = f"[{color}]{status:>16}[/{color}]  {spec.id} ({spec.role})"
+                node = root.add(label)
+                r = board.read_result(child_dir)
+                if r is not None and r.summary:
+                    node.add(f"[dim]{r.summary[:120]}[/dim]")
+    else:
+        root.add("[dim]no plan yet[/dim]")
+
+    console.print(root)
 
 
 @app.command()

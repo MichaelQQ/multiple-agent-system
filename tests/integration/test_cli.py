@@ -86,6 +86,57 @@ class TestShow:
         assert "20260416-d-2222" in result.output
         assert "20260416-x-3333" in result.output
 
+    def test_show_task_tree(self, tmp_board, monkeypatch):
+        """`mas show <id>` renders the subtask tree with statuses."""
+        from mas.schemas import Plan, Result, SubtaskSpec
+
+        monkeypatch.chdir(tmp_board.parent)
+        parent = _write_task(tmp_board, "doing", "20260423-tree-aaaa",
+                             role="orchestrator", goal="parent goal")
+        plan = Plan(parent_id="20260423-tree-aaaa", summary="s",
+                    subtasks=[
+                        SubtaskSpec(id="impl-1", role="implementer", goal="g"),
+                        SubtaskSpec(id="eval-1", role="evaluator", goal="g"),
+                    ])
+        (parent / "plan.json").write_text(plan.model_dump_json())
+        (parent / "subtasks" / "impl-1").mkdir(parents=True)
+        (parent / "subtasks" / "impl-1" / "result.json").write_text(
+            Result(task_id="impl-1", status="success", summary="done").model_dump_json()
+        )
+        (parent / "subtasks" / "eval-1").mkdir(parents=True)
+
+        result = runner.invoke(app, ["show", "20260423-tree-aaaa"])
+        assert result.exit_code == 0
+        assert "impl-1" in result.output
+        assert "eval-1" in result.output
+        assert "success" in result.output
+        assert "pending" in result.output
+
+    def test_show_task_not_found(self, tmp_board, monkeypatch):
+        monkeypatch.chdir(tmp_board.parent)
+        result = runner.invoke(app, ["show", "does-not-exist"])
+        assert result.exit_code == 1
+        assert "not found" in result.output
+
+    def test_show_board_includes_progress_column(self, tmp_board, monkeypatch):
+        """Top-level show table shows a subtask-progress summary for doing/ tasks."""
+        from mas.schemas import Plan, Result, SubtaskSpec
+
+        monkeypatch.chdir(tmp_board.parent)
+        parent = _write_task(tmp_board, "doing", "20260423-prog-aaaa",
+                             role="orchestrator", goal="with progress")
+        plan = Plan(parent_id="20260423-prog-aaaa", summary="s",
+                    subtasks=[SubtaskSpec(id="a", role="implementer", goal="g")])
+        (parent / "plan.json").write_text(plan.model_dump_json())
+        (parent / "subtasks" / "a").mkdir(parents=True)
+        (parent / "subtasks" / "a" / "result.json").write_text(
+            Result(task_id="a", status="success", summary="done").model_dump_json()
+        )
+        result = runner.invoke(app, ["show"])
+        assert result.exit_code == 0
+        assert "success" in result.output
+        assert "progress" in result.output
+
 
 # ── init ──────────────────────────────────────────────────────────
 

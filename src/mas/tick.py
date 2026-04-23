@@ -172,6 +172,10 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
         result = _synthesize_orphan_result(child_dir, next_child.id, next_child.role, child_attempt)
 
     if result is not None:
+        from . import verify as _verify
+        result = _verify.verify_child_result(next_child, result, child_dir, child_attempt)
+        if next_child.role == "evaluator":
+            result = _verify.verify_evaluator_result(next_child, result, wt)
         _handle_child_result(env, parent_dir, parent_task, plan, next_child, result)
         return
 
@@ -180,7 +184,7 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
         parent_id=parent_task.id,
         role=next_child.role,
         goal=next_child.goal,
-        inputs=next_child.inputs,
+        inputs=_resolve_feedback_ref(next_child.inputs, plan),
         constraints=next_child.constraints,
         prior_results=_collect_prior_results(plan, next_child.id, subtasks_root),
         cycle=parent_task.cycle,
@@ -229,12 +233,23 @@ def _read_log_tail(task_dir: Path, role: str, attempt: int, lines: int = 20) -> 
     return "\n".join(text.splitlines()[-lines:])
 
 
+_ENV_ORPHAN_MARKERS = (
+    "blocked by the sandbox",
+    "sandbox restrictions",
+    "requires explicit user approval",
+    "blocked as sensitive",
+    "permission denied",
+)
+
+
 def _synthesize_orphan_result(task_dir: Path, task_id: str, role: str, attempt: int) -> Result:
     tail = _read_log_tail(task_dir, role, attempt)
+    lower = tail.lower()
+    is_env = any(m in lower for m in _ENV_ORPHAN_MARKERS)
     r = Result(
         task_id=task_id,
-        status="failure",
-        summary=f"{role} exited without writing result.json",
+        status="environment_error" if is_env else "failure",
+        summary=f"{role} exited without writing result.json" + (" (environment error)" if is_env else ""),
         feedback=(f"log tail:\n{tail}" if tail else None),
         duration_s=0.0,
     )
@@ -287,22 +302,42 @@ def _pid_alive(pid: int) -> bool:
 
 
 def _next_ready_child(plan: Plan, subtasks_root: Path):
-    for spec in plan.subtasks:
+    for i, spec in enumerate(plan.subtasks):
         child_dir = subtasks_root / spec.id
         result = board.read_result(child_dir) if child_dir.exists() else None
         if result is None:
             return spec
         if result.status == "success" and (spec.role != "evaluator" or result.verdict == "pass"):
             continue
-        # Found one that needs attention (failure / needs_revision / evaluator fail)
+        # Evaluator that returned needs_revision is "handled" once a later
+        # revision cycle has been appended; otherwise tick loops on the same
+        # evaluator forever.
+        if (spec.role == "evaluator"
+                and (result.verdict == "needs_revision" or result.status == "needs_revision")
+                and i + 1 < len(plan.subtasks)):
+            continue
+        # Found one that needs attention (failure / unresolved needs_revision)
         return spec
     return None
 
 
 def _all_children_passed(plan: Plan, subtasks_root: Path) -> bool:
-    for spec in plan.subtasks:
+    for i, spec in enumerate(plan.subtasks):
         result = board.read_result(subtasks_root / spec.id)
-        if result is None or result.status != "success":
+        if result is None:
+            return False
+        # A needs_revision evaluator is superseded once its revision cycle
+        # has been spawned (there is a later subtask); the next evaluator is
+        # what counts. This applies to both status=needs_revision on the
+        # Result and verdict=needs_revision.
+        superseded_eval = (
+            spec.role == "evaluator"
+            and (result.status == "needs_revision" or result.verdict == "needs_revision")
+            and i + 1 < len(plan.subtasks)
+        )
+        if superseded_eval:
+            continue
+        if result.status != "success":
             return False
         if spec.role == "evaluator" and result.verdict != "pass":
             return False
@@ -325,14 +360,36 @@ def _handle_child_result(env, parent_dir, parent_task, plan, spec, result):
         _append_revision_cycle(parent_dir, plan, parent_task, feedback=result.feedback or "")
         return
 
-    # Failure: retry up to max_retries
-    attempts_path = (parent_dir / "subtasks" / spec.id / ".attempt").resolve()
+    child_dir = parent_dir / "subtasks" / spec.id
+    attempts_path = (child_dir / ".attempt").resolve()
     attempt = int(attempts_path.read_text()) if attempts_path.exists() else 1
+
+    # environment_error: retry without consuming the role's retry budget, but
+    # cap total env retries to prevent infinite loops.
+    if result.status == "environment_error":
+        env_path = child_dir / ".env_retries"
+        env_n = int(env_path.read_text()) if env_path.exists() else 0
+        ENV_RETRY_CAP = 3
+        if env_n < ENV_RETRY_CAP:
+            env_path.write_text(str(env_n + 1))
+            # Rename result so the same attempt slot is redispatched with a
+            # fresh log file; keep the same attempt counter.
+            (child_dir / "result.json").rename(child_dir / f"result.env-{env_n + 1}.json")
+            # Rotate the log so the next dispatch lands in role-{attempt}.log cleanly.
+            stale_log = child_dir / "logs" / f"{spec.role}-{attempt}.log"
+            if stale_log.exists():
+                stale_log.rename(child_dir / "logs" / f"{spec.role}-{attempt}.env-{env_n + 1}.log")
+            (child_dir / ".previous_failure").write_text(
+                f"[environment_error] {result.summary}\n" + (result.feedback or "")
+            )
+            return
+        # Env retries exhausted → fall through to failure handling below.
+
+    # Failure: retry up to max_retries
     role_cfg = env.cfg.roles[spec.role]
     if attempt < (role_cfg.max_retries + 1):
         # Bump attempt and clear result so next tick redispatches with previous_failure.
         attempts_path.write_text(str(attempt + 1))
-        child_dir = parent_dir / "subtasks" / spec.id
         (child_dir / "result.json").rename(child_dir / f"result.failed-{attempt}.json")
         # Remove any stale result.json the worker may have written inside the worktree.
         stale = parent_dir / "worktree" / "result.json"
@@ -350,23 +407,37 @@ def _handle_child_result(env, parent_dir, parent_task, plan, spec, result):
 def _append_revision_cycle(parent_dir: Path, plan: Plan, parent_task, feedback: str) -> None:
     from .schemas import SubtaskSpec
 
-    # Bound by plan.max_revision_cycles
-    existing_cycles = sum(1 for s in plan.subtasks if s.id.startswith("rev-"))
+    # Bound by plan.max_revision_cycles (count distinct cycles, not subtasks)
+    existing_cycles = len({s.id.split("-", 2)[1] for s in plan.subtasks if s.id.startswith("rev-")})
     if existing_cycles >= plan.max_revision_cycles:
         return
 
     cycle_n = existing_cycles + 1
-    base_inputs = {"feedback": feedback, "parent_goal": parent_task.goal}
+    cycle_key = f"rev-{cycle_n}"
+    plan.revision_feedback[cycle_key] = feedback
+    ref_inputs = {"feedback_cycle": cycle_key, "parent_goal": parent_task.goal}
     new_children = [
-        SubtaskSpec(id=f"rev-{cycle_n}-tester", role="tester",
-                    goal=f"Augment tests to cover evaluator feedback (cycle {cycle_n})", inputs=base_inputs),
-        SubtaskSpec(id=f"rev-{cycle_n}-implementer", role="implementer",
-                    goal=f"Address evaluator feedback and make tests pass (cycle {cycle_n})", inputs=base_inputs),
-        SubtaskSpec(id=f"rev-{cycle_n}-evaluator", role="evaluator",
-                    goal=f"Evaluate revision {cycle_n}", inputs=base_inputs),
+        SubtaskSpec(id=f"{cycle_key}-tester", role="tester",
+                    goal=f"Augment tests to cover evaluator feedback (cycle {cycle_n})", inputs=ref_inputs),
+        SubtaskSpec(id=f"{cycle_key}-implementer", role="implementer",
+                    goal=f"Address evaluator feedback and make tests pass (cycle {cycle_n})", inputs=ref_inputs),
+        SubtaskSpec(id=f"{cycle_key}-evaluator", role="evaluator",
+                    goal=f"Evaluate revision {cycle_n}", inputs=ref_inputs),
     ]
     plan.subtasks.extend(new_children)
     (parent_dir / "plan.json").write_text(plan.model_dump_json(indent=2))
+
+
+def _resolve_feedback_ref(spec_inputs: dict, plan: Plan) -> dict:
+    """Resolve `feedback_cycle` → `feedback` using plan.revision_feedback.
+    Returns a new dict (does not mutate spec_inputs)."""
+    if "feedback_cycle" not in spec_inputs:
+        return spec_inputs
+    cycle_key = spec_inputs["feedback_cycle"]
+    feedback = plan.revision_feedback.get(cycle_key, "")
+    resolved = {k: v for k, v in spec_inputs.items() if k != "feedback_cycle"}
+    resolved["feedback"] = feedback
+    return resolved
 
 
 def _finalize_parent(env: TickEnv, parent_dir: Path, parent_task) -> None:

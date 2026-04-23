@@ -9,7 +9,7 @@ import re
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 Role = Literal["proposer", "orchestrator", "implementer", "tester", "evaluator"]
-Status = Literal["success", "failure", "needs_revision"]
+Status = Literal["success", "failure", "needs_revision", "environment_error"]
 Verdict = Literal["pass", "fail", "needs_revision"]
 
 _TASK_ID_PATTERN = re.compile(r"^\d{8}-[a-zA-Z0-9_-]+-[a-f0-9]{4}$")
@@ -100,6 +100,9 @@ class Plan(BaseModel):
     summary: str
     subtasks: list[SubtaskSpec]
     max_revision_cycles: int = 2
+    # Per-cycle evaluator feedback, stored once and referenced by each
+    # rev-N-* subtask via inputs.feedback_cycle, to avoid 3x duplication.
+    revision_feedback: dict[str, str] = Field(default_factory=dict)
 
 
 class RoleConfig(BaseModel):

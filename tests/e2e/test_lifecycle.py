@@ -427,13 +427,16 @@ class TestRevisionCycleLifecycle:
         revision_ids = {s.id for s in updated_plan.subtasks if s.id.startswith("rev-")}
         assert len(revision_ids) >= 1
 
-        found_feedback = False
+        # Feedback is stored once per cycle on the Plan; rev-* subtasks carry a
+        # feedback_cycle reference instead of the full text (deduped).
+        assert feedback_text in updated_plan.revision_feedback.get("rev-1", "")
+        found_ref = False
         for spec in updated_plan.subtasks:
             if spec.id.startswith("rev-") and spec.role == "implementer":
-                assert "feedback" in spec.inputs
-                assert feedback_text in spec.inputs.get("feedback", "")
-                found_feedback = True
-        assert found_feedback, "Revision implementer should have feedback in inputs"
+                assert spec.inputs.get("feedback_cycle") == "rev-1"
+                assert "feedback" not in spec.inputs
+                found_ref = True
+        assert found_ref, "Revision implementer should reference rev-1 feedback_cycle"
 
 
 class TestFailureRecovery:

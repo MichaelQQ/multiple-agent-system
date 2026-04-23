@@ -583,6 +583,55 @@ def test_handle_child_result_failure_bumps_attempt(tmp_path: Path):
     assert (child / ".previous_failure").exists()
 
 
+def test_handle_child_result_env_error_does_not_bump_attempt(tmp_path: Path):
+    """environment_error does not consume retry budget — same attempt is redispatched."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent = _seed_parent_with_plan(mas, "20260423-p-env-aaaa", "20260423-impl-1-aaaa")
+    child = parent / "subtasks" / "20260423-impl-1-aaaa"
+    (child / ".attempt").write_text("1")
+    (child / "logs").mkdir()
+    (child / "logs" / "implementer-1.log").write_text("blocked by the sandbox")
+    r = Result(task_id="20260423-impl-1-aaaa", status="environment_error", summary="sandbox")
+    (child / "result.json").write_text(r.model_dump_json())
+
+    plan = parse_plan(parent / "plan.json", "20260423-p-env-aaaa")
+    spec = plan.subtasks[0]
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg(max_retries=2))
+
+    _handle_child_result(env, parent, board.read_task(parent), plan, spec, r)
+
+    # Attempt counter NOT bumped; result stashed as env-1, not failed-1.
+    assert (child / ".attempt").read_text().strip() == "1"
+    assert not (child / "result.failed-1.json").exists()
+    assert (child / "result.env-1.json").exists()
+    assert not (child / "result.json").exists()
+    assert (child / ".env_retries").read_text().strip() == "1"
+    assert (child / ".previous_failure").exists()
+
+
+def test_handle_child_result_env_error_caps_after_three(tmp_path: Path):
+    """After 3 env retries, env-error falls through to normal failure handling."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent = _seed_parent_with_plan(mas, "20260423-p-envc-aaaa", "20260423-impl-1-aaaa")
+    child = parent / "subtasks" / "20260423-impl-1-aaaa"
+    (child / ".attempt").write_text("1")
+    (child / ".env_retries").write_text("3")
+    r = Result(task_id="20260423-impl-1-aaaa", status="environment_error", summary="sandbox")
+    (child / "result.json").write_text(r.model_dump_json())
+
+    plan = parse_plan(parent / "plan.json", "20260423-p-envc-aaaa")
+    spec = plan.subtasks[0]
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg(max_retries=2))
+
+    _handle_child_result(env, parent, board.read_task(parent), plan, spec, r)
+
+    # Fell through: attempt bumped as normal failure.
+    assert (child / ".attempt").read_text().strip() == "2"
+    assert (child / "result.failed-1.json").exists()
+
+
 def test_handle_child_result_failure_max_retries_moves_parent(tmp_path: Path):
     """Failed child at max_retries → parent moved to failed/."""
     mas = tmp_path / ".mas"
@@ -681,6 +730,75 @@ def test_all_children_passed_false_missing_result(tmp_path: Path):
     assert result is False
 
 
+def test_next_ready_child_skips_needs_revision_eval_after_cycle_spawned(tmp_path: Path):
+    """Evaluator with needs_revision verdict should be skipped once a revision
+    cycle has been appended. Otherwise tick loops forever on the same evaluator."""
+    from mas.tick import _next_ready_child
+
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent = board.task_dir(mas, "doing", "20260423-p-nrc-aaaa")
+    parent.mkdir(parents=True)
+    subtasks = parent / "subtasks"
+    subtasks.mkdir()
+    plan = Plan(
+        parent_id="20260423-p-nrc-aaaa", summary="s",
+        subtasks=[
+            SubtaskSpec(id="eval-1", role="evaluator", goal="eval"),
+            SubtaskSpec(id="rev-1-tester", role="tester", goal="t",
+                        inputs={"feedback_cycle": "rev-1"}),
+            SubtaskSpec(id="rev-1-implementer", role="implementer", goal="i",
+                        inputs={"feedback_cycle": "rev-1"}),
+            SubtaskSpec(id="rev-1-evaluator", role="evaluator", goal="e",
+                        inputs={"feedback_cycle": "rev-1"}),
+        ],
+        revision_feedback={"rev-1": "fb"},
+    )
+    e = subtasks / "eval-1"
+    e.mkdir()
+    (e / "result.json").write_text(
+        Result(task_id="eval-1", status="needs_revision", summary="r",
+               verdict="needs_revision", feedback="fb").model_dump_json()
+    )
+
+    nxt = _next_ready_child(plan, subtasks)
+    assert nxt is not None
+    assert nxt.id == "rev-1-tester"
+
+
+def test_all_children_passed_ignores_superseded_needs_revision_eval(tmp_path: Path):
+    """An eval that needs_revision + has a successor cycle should not block finalization
+    once the later evaluator passes."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent = board.task_dir(mas, "doing", "20260423-p-acp-aaaa")
+    parent.mkdir(parents=True)
+    subtasks = parent / "subtasks"
+    subtasks.mkdir()
+    plan = Plan(
+        parent_id="20260423-p-acp-aaaa", summary="s",
+        subtasks=[
+            SubtaskSpec(id="eval-1", role="evaluator", goal="eval"),
+            SubtaskSpec(id="rev-1-tester", role="tester", goal="t"),
+            SubtaskSpec(id="rev-1-implementer", role="implementer", goal="i"),
+            SubtaskSpec(id="rev-1-evaluator", role="evaluator", goal="e"),
+        ],
+    )
+    for tid, status, verdict in [
+        ("eval-1", "needs_revision", "needs_revision"),
+        ("rev-1-tester", "success", None),
+        ("rev-1-implementer", "success", None),
+        ("rev-1-evaluator", "success", "pass"),
+    ]:
+        d = subtasks / tid
+        d.mkdir()
+        (d / "result.json").write_text(
+            Result(task_id=tid, status=status, summary="s", verdict=verdict).model_dump_json()
+        )
+
+    assert _all_children_passed(plan, subtasks) is True
+
+
 def test_all_children_passed_evaluator_verdict_fail(tmp_path: Path):
     """Evaluator result with verdict!=pass → False."""
     mas = tmp_path / ".mas"
@@ -749,6 +867,39 @@ def test_append_revision_cycle_orders_tester_before_implementer(tmp_path: Path):
     updated = parse_plan(parent / "plan.json", "20260415-p-12b-aaaa")
     rev = [s for s in updated.subtasks if s.id.startswith("rev-1-")]
     assert [s.role for s in rev] == ["tester", "implementer", "evaluator"]
+
+
+def test_append_revision_cycle_stores_feedback_once(tmp_path: Path):
+    """Feedback is stored once on plan.revision_feedback, not duplicated
+    across the three rev-N subtask inputs."""
+    from mas.tick import _resolve_feedback_ref
+
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent = board.task_dir(mas, "doing", "20260423-p-fb1-aaaa")
+    parent.mkdir(parents=True)
+    board.write_task(parent, Task(id="20260423-p-fb1-aaaa", role="orchestrator", goal="g"))
+    (parent / "subtasks").mkdir()
+    plan = Plan(parent_id="20260423-p-fb1-aaaa", summary="s",
+                subtasks=[SubtaskSpec(id="20260423-eval-1-aaaa", role="evaluator", goal="eval")],
+                max_revision_cycles=2)
+    (parent / "plan.json").write_text(plan.model_dump_json())
+
+    big_feedback = "x" * 4000
+    _append_revision_cycle(parent, plan, board.read_task(parent), big_feedback)
+
+    updated = parse_plan(parent / "plan.json", "20260423-p-fb1-aaaa")
+    assert updated.revision_feedback["rev-1"] == big_feedback
+    rev = [s for s in updated.subtasks if s.id.startswith("rev-1-")]
+    assert len(rev) == 3
+    for s in rev:
+        assert "feedback" not in s.inputs, "feedback text must not be duplicated in subtask inputs"
+        assert s.inputs["feedback_cycle"] == "rev-1"
+
+    # At dispatch time, _resolve_feedback_ref turns the ref back into real feedback.
+    resolved = _resolve_feedback_ref(rev[0].inputs, updated)
+    assert resolved["feedback"] == big_feedback
+    assert "feedback_cycle" not in resolved
 
 
 def test_append_revision_cycle_respects_max_cap(tmp_path: Path):
