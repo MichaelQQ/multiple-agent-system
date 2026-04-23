@@ -1,168 +1,90 @@
 # Testing Strategy
 
-This document defines the testing approach for the MAS project, including test layers, component mapping, mocking guidance, and organization conventions.
+This project uses three test layers: **Unit Tests**, **Integration Tests**, and **E2E Tests**. The goal is to keep board/state logic easy to refactor, keep adapter and CLI wiring honest, and preserve one realistic lifecycle suite that exercises the full task pipeline.
 
-## Test Layers
+## Unit Tests
 
-### Unit Tests
+**Purpose**: validate local behavior with minimal dependencies and fast feedback.
 
-**Purpose**: Test individual components in isolation with no external dependencies.
+**Primary targets**:
+- `board.py`: task reads, moves, task lookup, PID bookkeeping, result handling
+- `schemas.py`: Pydantic validation and JSON contracts
+- `ids.py`: task id generation and parsing rules
+- `config.py`: config loading, merging, and validation
+- `worktree.py`: branch/worktree helpers and pruning behavior
+- focused adapter helpers where the behavior is local and deterministic
 
-**Scope**:
-- Pure functions and data transformations
-- Individual classes and their methods
-- Schema validation
-- Configuration parsing
-- State transitions within a single component
+**Current location**:
+- Most unit tests live at `tests/test_*.py`
+- Representative files: `tests/test_board.py`, `tests/test_ids.py`, `tests/test_schemas.py`, `tests/test_config.py`, `tests/test_worktree.py`
 
-**Examples**:
-- `board.py` - Board state management, task operations
-- `schemas.py` - Data validation, type conversions
-- `ids.py` - ID generation and parsing
+Use `tmp_path`, `monkeypatch`, and direct function calls by default. Do not mock Pydantic validation itself; exercise the real models.
 
-### Integration Tests
+## Integration Tests
 
-**Purpose**: Test interactions between components and with external services.
+**Purpose**: verify interaction between components with realistic filesystem state and mocked external CLIs/services.
 
-**Scope**:
-- Adapter dispatch and protocol handling
-- State machine transitions across components
-- External API communication (Ollama, Gemini, Claude Code)
-- Process spawning and lifecycle management
+**Primary targets**:
+- `tick.py`: dispatch, retries, revision cycles, parent finalization
+- `adapters/`: provider command construction and subprocess protocol behavior
+- CLI commands in `cli.py`
+- config and board interactions across module boundaries
 
-**Examples**:
-- `tick.py` - State machine coordination
-- `adapters/` - External service integration
-- `test_ollama.py` - Ollama API integration
+**Current location**:
+- `tests/integration/`
+- adapter-specific suites in `tests/adapters/`
+- some cross-module cases still live in top-level files such as `tests/test_tick.py`, `tests/test_cli.py`, `tests/test_orphan.py`, and `tests/test_retry_marker.py`
 
-### E2E Tests
+Representative files:
+- `tests/adapters/test_ollama.py`
+- `tests/adapters/test_script_adapter.py`
+- `tests/integration/test_cli.py`
+- `tests/test_tick.py`
 
-**Purpose**: Test complete workflows from start to finish.
+Mock subprocesses and external APIs at the boundary. For Ollama or other external API behavior, patch the HTTP/client call sites and assert the translated MAS result shape, not just raw transport details.
 
-**Scope**:
-- Full tick loop execution
-- Worktree creation and management
-- Multi-agent coordination
-- End-to-end user scenarios
+## E2E Tests
 
-## Component Layer Mapping
+**Purpose**: exercise the full MAS lifecycle on a real temp repo with a real `.mas/` layout.
 
-| Component | Layer | Rationale |
-|-----------|-------|----------|
-| `board.py` | Unit | Board state is internal data structure |
-| `schemas.py` | Unit | Pure data validation |
-| `tick.py` (state machine) | Integration | Coordinates between components |
-| `adapters/` | Integration | External service communication |
-| Full tick loop | E2E | Complete workflow |
-| Worktree creation | E2E | Filesystem and process integration |
+**Current location**:
+- `tests/e2e/test_lifecycle.py`
+- `tests/e2e/test_lifecycle_script.py`
+
+These suites cover:
+- proposal to done flow
+- failure and retry behavior
+- evaluator-driven revision cycles
+- worktree creation and pruning
+- script-provider subprocess execution
+
+E2E tests should use real board directories and real tick progression. External agent CLIs are still replaced with deterministic scripts or mocks so the tests stay repeatable.
 
 ## Mocking Guidance
 
-### Subprocess Calls
+- Use `tmp_path` for filesystem-heavy tests instead of mocking every `Path` operation.
+- Use `monkeypatch` or `unittest.mock.patch` for subprocess spawning, PID checks, and provider-specific boundary calls.
+- Mock external APIs such as Ollama at the transport boundary and keep MAS schema validation real.
+- Prefer fake adapters or script adapters when you need to simulate end-to-end worker behavior.
 
-Use `unittest.mock` or `monkeypatch` to mock subprocess calls in adapters:
+## Layout Conventions
 
-```python
-from unittest.mock import patch, MagicMock
+The current tree is intentionally mixed:
+- `tests/test_*.py` holds most unit tests and some older integration-style tests
+- `tests/adapters/` holds provider adapter coverage
+- `tests/integration/` holds broader CLI and cross-component scenarios
+- `tests/e2e/` holds lifecycle tests
 
-@patch('subprocess.run')
-def test_adapter(mock_run):
-    mock_run.return_value = MagicMock(returncode=0)
-    # test adapter code
-```
+New tests do not need a large directory migration. Place them where they fit best:
+- small isolated module behavior: top-level `tests/test_*.py`
+- provider-specific behavior: `tests/adapters/`
+- multi-module or CLI wiring: `tests/integration/`
+- full lifecycle flows: `tests/e2e/`
 
-### Filesystem Operations
+## Running Tests
 
-Use `tmp_path` fixture for board/worktree filesystem operations:
-
-```python
-def test_worktree_creation(tmp_path):
-    worktree_dir = tmp_path / "worktree"
-    worktree_dir.mkdir()
-    # test filesystem operations
-```
-
-### External API Responses
-
-Mock Ollama HTTP responses with a fixture or `responses` library:
-
-```python
-import responses
-
-@responses.activate
-def test_ollama():
-    responses.add(responses.POST, "http://localhost:11434/api/generate",
-                 json={"response": "test"}, status=200)
-    # test Ollama client
-```
-
-### Process Checks
-
-Mock PID-based process checks for daemon testing:
-
-```python
-@patch('os.kill')
-def test_process_check(mock_kill):
-    mock_kill.side_effect = OSError("No such process")
-    # test process checks
-```
-
-## Existing Test Mapping
-
-| Test File | Current Layer | Recommended Layer |
-|----------|--------------|-------------------|
-| `test_board.py` | Unit | Unit |
-| `test_schemas.py` | Unit | Unit |
-| `test_ids.py` | Unit | Unit |
-| `test_ollama.py` | Integration | Integration |
-| `test_orphan.py` | Integration | Integration |
-| `test_retry_marker.py` | Integration | Integration |
-| `tests/e2e/test_lifecycle.py` | E2E | E2E |
-
-## Test Organization Conventions
-
-### Directory Structure
-
-```
-tests/
-├── unit/           # Unit tests
-├── integration/    # Integration tests
-└── e2e/           # E2E tests
-```
-
-### Naming Conventions
-
-- Unit tests: `test_<module>.py` (e.g., `test_board.py`)
-- Integration tests: `test_<feature>_integration.py`
-- E2E tests: `test_<workflow>_e2e.py`
-
-### Markers
-
-Use pytest markers to categorize tests:
-
-```python
-@pytest.mark.unit
-def test_board_state():
-    pass
-
-@pytest.mark.integration
-def test_adapter_dispatch():
-    pass
-
-@pytest.mark.e2e
-def test_full_tick_loop():
-    pass
-```
-
-### Running Tests by Layer
-
-```bash
-# Run only unit tests
-pytest -m unit
-
-# Run only integration tests
-pytest -m integration
-
-# Run only E2E tests
-pytest -m e2e
+```sh
+.venv/bin/pytest -q
+.venv/bin/pytest tests/adapters/ tests/integration/ -q
+.venv/bin/pytest tests/e2e/ -q
 ```

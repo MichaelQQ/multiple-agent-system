@@ -14,6 +14,12 @@ python -m venv .venv
 
 Put `.venv/bin` on your `$PATH` or use `.venv/bin/mas` directly.
 
+Optional web UI dependencies:
+
+```sh
+.venv/bin/pip install -e ".[web]"
+```
+
 ## Per-project setup
 
 Inside each target repo:
@@ -47,9 +53,12 @@ Seed proposer context in `.mas/ideas.md` (one bullet per idea).
 mas validate                  # validate config, providers, and prompts (runs automatically before tick/daemon)
 mas tick                      # run one pass: reap → advance → dispatch
 mas show                      # print the board
+mas show <id>                 # render one task's subtask tree
 mas promote <id>              # proposed/  → doing/  (human approval gate)
 mas retry   <id>              # failed/    → doing/
-mas logs    <id> [-f]         # tail the latest worker log
+mas logs    <id> [-f]         # print/follow the latest worker log
+mas tail    <id> [-n 50] [-f] # tail task logs with line control
+mas prune                     # prune leftover worktrees under done/ and failed/
 mas audit   <id>              # display structured audit timeline for a task
 mas cost    <id>              # print per-subtask token/cost breakdown
 ```
@@ -66,7 +75,7 @@ mas audit <id> --status success        # filter by status
 mas audit <id> --since 2026-04-20T00:00:00Z --until 2026-04-21T00:00:00Z
 ```
 
-`mas logs <id>` and `mas tail` show raw subprocess output; `mas audit` shows
+`mas logs <id>` and `mas tail <id>` show raw subprocess output; `mas audit` shows
 the structured event timeline emitted by the tick loop itself.
 
 #### `audit.jsonl` format
@@ -182,6 +191,20 @@ mas cron uninstall
 Cron entries are scoped per project (hash of the absolute path), so multiple
 projects can each install their own schedule without colliding.
 
+## Web UI
+
+Install the optional `web` extra, then run:
+
+```sh
+mas web
+mas web --host 127.0.0.1 --port 8765
+```
+
+The local UI shows the board, task details, recent audit events, cost totals,
+and log tails. It also exposes the same basic actions as the CLI: promote,
+retry, trigger a tick, start/stop the daemon, and prune completed worktrees.
+It is designed for local loopback use and has no auth layer.
+
 ## Layout
 
 ```
@@ -247,10 +270,14 @@ Every worker subprocess is launched with:
 Prompt templates (`$task_dir`, `$worktree`, `$mas_dir`, `$goal`, etc.) are
 rendered with `string.Template.safe_substitute` before dispatch.
 
+Project config is loaded from `.mas/` and merged with optional user defaults in
+`~/.config/mas/`.
+
 ## Tests
 
 ```sh
 .venv/bin/pytest -q                                          # all tests
+.venv/bin/pytest tests/adapters/ tests/integration/ -q       # integration-heavy suites
 .venv/bin/pytest tests/e2e/ -q                               # E2E tests only
 ```
 
@@ -260,37 +287,12 @@ rendered with `string.Template.safe_substitute` before dispatch.
 - **Integration** (`tests/integration/`): Board and tick interactions with mocked adapters.
 - **E2E** (`tests/e2e/`): Full lifecycle scenarios using a real `.mas` directory with config/roles, real tick loop and board operations, but mocked adapter dispatch.
 
-### E2E test coverage
-
-The E2E suite (`tests/e2e/test_lifecycle.py`) contains 8 tests covering:
-
-| Test class | Coverage |
-|------------|----------|
-| `TestHappyPathLifecycle` | Happy path: proposal → orchestration → implementation → testing → evaluation → done. Board transitions. |
-| `TestRevisionCycleLifecycle` | Revision cycles bounded by `max_revision_cycles`, feedback propagation from evaluator to implementer. |
-| `TestFailureRecovery` | Subtask max_retries moves parent to `failed/`. |
-| `TestWorktreeLifecycle` | Git worktree created on orchestration, pruned on done. |
-| `TestPriorResultsPropagation` | Prior results injected into implementer's `task.json`. |
-
-All E2E tests use a real `.mas` directory with `config.yaml`/`roles.yaml`, real tick loop and board operations, but mock adapter dispatch calls to simulate agent output.
+The E2E suites (`tests/e2e/test_lifecycle.py` and
+`tests/e2e/test_lifecycle_script.py`) exercise the full MAS task lifecycle from
+proposed → doing → done. They validate task transitions, schema compliance,
+revision cycles, worktree lifecycle, and script-provider subprocess behavior.
 
 See [TESTING_STRATEGY.md](TESTING_STRATEGY.md) for the full testing approach.
-
-### E2E Tests
-
-The E2E test suite (`tests/e2e/`) exercises the full MAS task lifecycle from
-proposed → doing → done. It validates:
-
-- Task lifecycle transitions and state machine behavior
-- Schema validation of task.json and result.json
-- transitions.jsonl logging
-- Git worktree creation and pruning
-
-Run E2E tests:
-
-```sh
-.venv/bin/pytest tests/e2e/ -v
-```
 
 #### Script Adapter
 
@@ -324,7 +326,7 @@ See `tests/e2e/scripts/` for examples of role scripts.
 
 ## Scope of v1
 
-Implemented: init, validate, tick, show, promote, retry, logs, cron install/uninstall/
-status, daemon start/stop/status. Out of scope (v2): `mas pr`, `mas kill`,
-`mas prune`, `mas stats`, `mas doctor`, launchd, parallel child execution,
-auto-PR/merge.
+Implemented: `init`, `upgrade`, `validate`, `tick`, `show`, `promote`,
+`retry`, `logs`, `tail`, `audit`, `cost`, `prune`, `cron`, `daemon`, and the
+optional `web` UI. Out of scope (v2): `mas pr`, `mas kill`, `mas stats`,
+`mas doctor`, launchd, parallel child execution, auto-PR/merge.
