@@ -46,4 +46,4 @@ Each adapter's `build_command()` returns the CLI invocation; `dispatch()` (inher
 - Concurrency: per-provider `max_concurrent` cap enforced by counting live PID files before dispatch.
 - Orphan detection: if a worker's log exists but no PID is alive and no `result.json` written, tick synthesizes a failure result to trigger retry/fail paths.
 - Transitions: every board move is logged to `transitions.jsonl` inside the task directory for audit.
-- Templates at `templates/` are packaged as `mas/_templates/` via hatchling `force-include`; `mas init` copies them into `.mas/`.
+- Templates at `templates/` are packaged as `mas/_templates/` via hatchling `force-include`; `mas init` copies them into `.mas/`. `mas upgrade` refreshes them interactively — per-file unified diff, confirmation prompt (skip with `-y/--yes`), and an optional daemon restart using the interval persisted in `.mas/daemon.interval`.

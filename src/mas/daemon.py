@@ -12,7 +12,9 @@ from pathlib import Path
 log = logging.getLogger("mas.daemon")
 
 PID_FILENAME = "daemon.pid"
+INTERVAL_FILENAME = "daemon.interval"
 LOG_FILENAME = "logs/daemon.log"
+DEFAULT_INTERVAL_SECONDS = 300
 
 
 def _stamp() -> str:
@@ -31,8 +33,24 @@ def _pid_path(mas: Path) -> Path:
     return mas / PID_FILENAME
 
 
+def _interval_path(mas: Path) -> Path:
+    return mas / INTERVAL_FILENAME
+
+
 def _log_path(mas: Path) -> Path:
     return mas / LOG_FILENAME
+
+
+def read_interval(mas: Path) -> int:
+    """Return the interval recorded by the last `start`, or the default."""
+    p = _interval_path(mas)
+    if not p.exists():
+        return DEFAULT_INTERVAL_SECONDS
+    try:
+        value = int(p.read_text().strip())
+    except (ValueError, OSError):
+        return DEFAULT_INTERVAL_SECONDS
+    return value if value > 0 else DEFAULT_INTERVAL_SECONDS
 
 
 def _pid_alive(pid: int) -> bool:
@@ -55,6 +73,7 @@ def _read_pid(mas: Path) -> int | None:
 
 def _clear_pid(mas: Path) -> None:
     _pid_path(mas).unlink(missing_ok=True)
+    _interval_path(mas).unlink(missing_ok=True)
 
 
 def start(project: Path, interval_seconds: int = 300) -> int:
@@ -108,6 +127,7 @@ def start(project: Path, interval_seconds: int = 300) -> int:
     os.dup2(log_file.fileno(), sys.stderr.fileno())
 
     _pid_path(mas).write_text(f"{os.getpid()}\n")
+    _interval_path(mas).write_text(f"{interval_seconds}\n")
 
     stop_flag = {"stop": False}
 

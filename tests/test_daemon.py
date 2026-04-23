@@ -9,11 +9,14 @@ import pytest
 
 from mas.daemon import (
     DaemonError,
+    DEFAULT_INTERVAL_SECONDS,
     _clear_pid,
+    _interval_path,
     _pid_alive,
     _pid_path,
     _read_pid,
     _run_loop,
+    read_interval,
     start,
     stop,
     status,
@@ -102,6 +105,30 @@ class TestClearPid:
 
     def test_clear_pid_succeeds_when_file_missing(self, mas):
         _clear_pid(mas)
+
+    def test_clear_pid_also_removes_interval_file(self, mas):
+        _pid_path(mas).write_text("12345\n")
+        _interval_path(mas).write_text("600\n")
+        _clear_pid(mas)
+        assert not _pid_path(mas).exists()
+        assert not _interval_path(mas).exists()
+
+
+class TestReadInterval:
+    def test_returns_default_when_missing(self, mas):
+        assert read_interval(mas) == DEFAULT_INTERVAL_SECONDS
+
+    def test_returns_recorded_value(self, mas):
+        _interval_path(mas).write_text("42\n")
+        assert read_interval(mas) == 42
+
+    def test_returns_default_when_corrupt(self, mas):
+        _interval_path(mas).write_text("not-a-number\n")
+        assert read_interval(mas) == DEFAULT_INTERVAL_SECONDS
+
+    def test_returns_default_for_nonpositive(self, mas):
+        _interval_path(mas).write_text("0\n")
+        assert read_interval(mas) == DEFAULT_INTERVAL_SECONDS
 
 
 class TestStatus:

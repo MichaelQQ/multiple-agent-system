@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import logging
 import shutil
 import subprocess
@@ -77,6 +78,9 @@ def init(
 @app.command()
 def upgrade(
     dry_run: bool = typer.Option(False, "--dry-run", help="Show what would change without writing"),
+    assume_yes: bool = typer.Option(
+        False, "-y", "--yes", help="Skip confirmation prompts (apply all changes, auto-restart daemon)"
+    ),
 ) -> None:
     """Update .mas/ template files from the installed package, preserving tasks and logs."""
     mas = project_dir()
@@ -94,18 +98,72 @@ def upgrade(
         for p in prompts_src.iterdir():
             targets.append((p, mas / "prompts" / p.name))
 
+    new_files: list[tuple[Path, Path]] = []
+    changed_files: list[tuple[Path, Path]] = []
+    unchanged = 0
     for src, dst in targets:
-        if dry_run:
-            status = "new" if not dst.exists() else "update"
-            typer.echo(f"  {status}: {dst.relative_to(mas.parent)}")
+        if not dst.exists():
+            new_files.append((src, dst))
+        elif src.read_bytes() != dst.read_bytes():
+            changed_files.append((src, dst))
         else:
-            shutil.copy(src, dst)
-            typer.echo(f"  wrote {dst.relative_to(mas.parent)}")
+            unchanged += 1
+
+    if not new_files and not changed_files:
+        typer.echo(f"already up to date ({unchanged} files unchanged)")
+        return
+
+    for src, dst in new_files:
+        typer.echo(f"  new: {dst.relative_to(mas.parent)}")
+    for src, dst in changed_files:
+        rel = dst.relative_to(mas.parent)
+        typer.echo(f"  update: {rel}")
+        diff = difflib.unified_diff(
+            dst.read_text().splitlines(keepends=True),
+            src.read_text().splitlines(keepends=True),
+            fromfile=f"a/{rel}",
+            tofile=f"b/{rel}",
+        )
+        for line in diff:
+            typer.echo(line.rstrip("\n"))
+    if unchanged:
+        typer.echo(f"  ({unchanged} files already up to date)")
 
     if dry_run:
         typer.echo("(dry-run, nothing written)")
-    else:
-        typer.echo("upgrade complete")
+        return
+
+    if not assume_yes and not typer.confirm("Apply these changes?", default=False):
+        typer.echo("upgrade aborted")
+        raise typer.Exit(1)
+
+    for src, dst in new_files + changed_files:
+        shutil.copy(src, dst)
+        typer.echo(f"  wrote {dst.relative_to(mas.parent)}")
+    typer.echo("upgrade complete")
+
+    _maybe_restart_daemon(assume_yes=assume_yes)
+
+
+def _maybe_restart_daemon(*, assume_yes: bool) -> None:
+    """If a daemon is running, offer to restart it so it picks up new templates."""
+    from . import daemon as daemon_mod
+
+    proj = project_root()
+    pid, running = daemon_mod.status(proj)
+    if pid is None or not running:
+        return
+
+    typer.echo(f"daemon is running (pid {pid}); it must restart to pick up changes")
+    if not assume_yes and not typer.confirm("Restart daemon now?", default=True):
+        typer.echo("skipping daemon restart (run `mas daemon stop && mas daemon start` to apply)")
+        return
+
+    mas = project_dir(proj)
+    interval = daemon_mod.read_interval(mas)
+    daemon_mod.stop(proj)
+    new_pid = daemon_mod.start(proj, interval_seconds=interval)
+    typer.echo(f"daemon restarted (pid {new_pid}, interval {interval}s)")
 
 
 @app.command()

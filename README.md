@@ -87,6 +87,24 @@ concurrency caps.
 2. **PR.** When a task lands in `done/`, its branch `mas/<id>` is preserved
    (worktree pruned). You open the PR yourself with `gh pr create`.
 
+## Upgrading templates
+
+```sh
+mas upgrade                   # show unified diff, prompt before applying
+mas upgrade --dry-run         # show diff only, never write
+mas upgrade --yes             # apply without prompting, auto-restart daemon
+```
+
+`mas upgrade` refreshes `.mas/config.yaml`, `.mas/roles.yaml`, and
+`.mas/prompts/*.md` from the installed package. Tasks, logs, and `ideas.md`
+are preserved. Per changed file, a unified diff is printed so you can review
+before confirming. When there is nothing to change, the command exits quickly
+with `already up to date`.
+
+If a daemon is running, the command prompts to restart it so the new templates
+take effect; the previous interval (persisted in `.mas/daemon.interval`) is
+reused.
+
 ## Scheduling
 
 ### Daemon (no system cron)
@@ -98,9 +116,9 @@ mas daemon status
 mas daemon stop
 ```
 
-The daemon writes its PID to `.mas/daemon.pid` and logs to
-`.mas/logs/daemon.log`. Only one daemon may run per project; starting a second
-raises an error.
+The daemon writes its PID to `.mas/daemon.pid`, its configured interval to
+`.mas/daemon.interval`, and logs to `.mas/logs/daemon.log`. Only one daemon
+may run per project; starting a second raises an error.
 
 ### System cron
 

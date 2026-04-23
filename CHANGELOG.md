@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `mas upgrade` now prints a unified diff for each changed template file and prompts for confirmation before writing. New `-y/--yes` flag skips the prompt.
+- `mas upgrade` detects a running daemon and offers to restart it so the new templates take effect. The previous tick interval is restored from a new `.mas/daemon.interval` sidecar written by `mas daemon start`.
+- `mas.daemon.read_interval(mas)` helper returning the last-started interval (defaults to 300s when missing or corrupt).
 - `MAS_OLLAMA_TIMEOUT` environment variable (default: 3600s) for controlling HTTP request timeout to the Ollama API.
 - E2E test suite (`tests/e2e/test_lifecycle.py`) covering full lifecycle scenarios, revision cycles, failure recovery, worktree lifecycle, and prior_results propagation. Run with `pytest tests/e2e/ -q`.
 - Script-adapter-driven E2E tests (`tests/e2e/test_lifecycle_script.py` plus `tests/e2e/conftest.py` and `tests/e2e/scripts/`) that exercise the full MAS task lifecycle from proposed → doing → done using real subprocesses, validating state transitions, schema compliance, transitions.jsonl logging, and Git worktree management.
