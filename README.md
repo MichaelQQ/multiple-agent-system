@@ -51,6 +51,7 @@ mas promote <id>              # proposed/  → doing/  (human approval gate)
 mas retry   <id>              # failed/    → doing/
 mas logs    <id> [-f]         # tail the latest worker log
 mas audit   <id>              # display structured audit timeline for a task
+mas cost    <id>              # print per-subtask token/cost breakdown
 ```
 
 ### Observability
@@ -125,6 +126,16 @@ concurrency caps.
    approved ones to `doing/`.
 2. **PR.** When a task lands in `done/`, its branch `mas/<id>` is preserved
    (worktree pruned). You open the PR yourself with `gh pr create`.
+
+## Cost tracking
+
+Each agent writes `tokens_in`, `tokens_out`, and `cost_usd` into its `result.json`. When a parent task completes, the tick loop aggregates those values across all subtask results and writes a summary `result.json` at the parent level.
+
+```sh
+mas cost <task-id>            # print per-subtask token/cost breakdown with totals
+```
+
+Providers that do not report token usage leave `tokens_in`, `tokens_out`, and `cost_usd` as `null` in `result.json`; the aggregation treats `null` as 0. Cost rates are defined in `src/mas/pricing.py` — add new provider/model entries there to enable cost calculation.
 
 ## Upgrading templates
 

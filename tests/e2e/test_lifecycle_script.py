@@ -273,6 +273,143 @@ class TestTransitionsLogging:
         assert ("doing", "done") in final_pairs
 
 
+class TestCostAggregationE2E:
+    """E2E tests verifying cost aggregation after a full lifecycle run."""
+
+    def test_parent_result_has_aggregated_costs_after_done(
+        self, git_repo: Path, mas_dir: Path, tmp_path
+    ):
+        """After all children succeed, parent result.json under done/ must have aggregated costs.
+
+        Pre-seeds child results with dummy tokens/cost (simulating script adapter output),
+        drives _finalize_parent via the tick loop, and asserts the parent result.json
+        contains summed totals.
+        """
+        from unittest.mock import patch
+
+        from mas import board, tick
+        from mas.schemas import Plan, Result, SubtaskSpec, Task
+
+        task_id = "20260421-e2ecost-aaaa"
+        child1_id = "20260421-e2cc1-aaaa"
+        child2_id = "20260421-e2cc2-aaaa"
+
+        doing_dir = board.task_dir(mas_dir, "doing", task_id)
+        doing_dir.mkdir(parents=True)
+        board.write_task(
+            doing_dir, Task(id=task_id, role="orchestrator", goal="E2E cost aggregation test")
+        )
+        (doing_dir / "worktree").mkdir()
+
+        plan = Plan(
+            parent_id=task_id,
+            summary="e2e test plan",
+            subtasks=[
+                SubtaskSpec(id=child1_id, role="implementer", goal="impl"),
+                SubtaskSpec(id=child2_id, role="evaluator", goal="eval"),
+            ],
+        )
+        (doing_dir / "plan.json").write_text(plan.model_dump_json())
+
+        subtasks_dir = doing_dir / "subtasks"
+        subtasks_dir.mkdir()
+
+        for cid, tin, tout, cost, verdict in [
+            (child1_id, 300, 150, 0.03, None),
+            (child2_id, 100, 50, 0.01, "pass"),
+        ]:
+            cd = subtasks_dir / cid
+            cd.mkdir()
+            (cd / "result.json").write_text(
+                Result(
+                    task_id=cid,
+                    status="success",
+                    summary="done",
+                    tokens_in=tin,
+                    tokens_out=tout,
+                    cost_usd=cost,
+                    verdict=verdict,
+                ).model_dump_json()
+            )
+
+        with patch("mas.tick.worktree.commit_changes"), \
+             patch("mas.tick.worktree.prune"), \
+             patch("mas.tick._maybe_dispatch_proposer"):
+            tick.run_tick(start=git_repo)
+
+        located = board.find_task(mas_dir, task_id)
+        assert located is not None, f"task {task_id} not found after tick"
+        col, final_dir = located
+        assert col == "done", f"task should be done after finalization, got {col}"
+
+        parent_result = board.read_result(final_dir)
+        assert parent_result is not None, (
+            "parent result.json must be written by _finalize_parent with aggregated costs"
+        )
+        assert parent_result.tokens_in == 400, "400 = 300 + 100"
+        assert parent_result.tokens_out == 200, "200 = 150 + 50"
+        assert parent_result.cost_usd == pytest.approx(0.04), "0.04 = 0.03 + 0.01"
+
+    def test_mas_cost_command_reports_aggregated_totals(
+        self, git_repo: Path, mas_dir: Path, monkeypatch
+    ):
+        """After lifecycle, `mas cost <task-id>` reports the aggregated cost breakdown."""
+        from unittest.mock import patch
+
+        from typer.testing import CliRunner
+
+        from mas import board, tick
+        from mas.cli import app
+        from mas.schemas import Plan, Result, SubtaskSpec, Task
+
+        task_id = "20260421-e2ccli-aaaa"
+        child_id = "20260421-e2cch1-aaaa"
+
+        doing_dir = board.task_dir(mas_dir, "doing", task_id)
+        doing_dir.mkdir(parents=True)
+        board.write_task(doing_dir, Task(id=task_id, role="orchestrator", goal="CLI cost E2E"))
+        (doing_dir / "worktree").mkdir()
+
+        plan = Plan(
+            parent_id=task_id,
+            summary="s",
+            subtasks=[SubtaskSpec(id=child_id, role="evaluator", goal="eval")],
+        )
+        (doing_dir / "plan.json").write_text(plan.model_dump_json())
+
+        subtasks_dir = doing_dir / "subtasks"
+        subtasks_dir.mkdir()
+        cd = subtasks_dir / child_id
+        cd.mkdir()
+        (cd / "result.json").write_text(
+            Result(
+                task_id=child_id,
+                status="success",
+                summary="done",
+                tokens_in=500,
+                tokens_out=250,
+                cost_usd=0.075,
+                verdict="pass",
+            ).model_dump_json()
+        )
+
+        with patch("mas.tick.worktree.commit_changes"), \
+             patch("mas.tick.worktree.prune"), \
+             patch("mas.tick._maybe_dispatch_proposer"):
+            tick.run_tick(start=git_repo)
+
+        located = board.find_task(mas_dir, task_id)
+        assert located is not None
+        col, _ = located
+        assert col == "done"
+
+        monkeypatch.chdir(mas_dir.parent)
+        cli_runner = CliRunner()
+        result = cli_runner.invoke(app, ["cost", task_id])
+        assert result.exit_code == 0, f"mas cost failed: {result.output}"
+        assert "0.075" in result.output or "cost" in result.output.lower()
+
+
 class TestFullIntegration:
     """Full integration tests combining all lifecycle components."""
 

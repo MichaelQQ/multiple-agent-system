@@ -460,10 +460,48 @@ def _resolve_feedback_ref(spec_inputs: dict, plan: Plan) -> dict:
     return resolved
 
 
+def _aggregate_child_costs(parent_dir: Path, plan) -> tuple[int, int, float]:
+    total_in = 0
+    total_out = 0
+    total_cost = 0.0
+    if plan is None:
+        return total_in, total_out, total_cost
+    subtasks_dir = parent_dir / "subtasks"
+    for spec in plan.subtasks:
+        r = board.read_result(subtasks_dir / spec.id) if subtasks_dir.exists() else None
+        if r is None:
+            continue
+        total_in += r.tokens_in or 0
+        total_out += r.tokens_out or 0
+        total_cost += r.cost_usd or 0.0
+    return total_in, total_out, total_cost
+
+
 def _finalize_parent(env: TickEnv, parent_dir: Path, parent_task) -> None:
     wt = parent_dir / "worktree"
     if wt.exists():
         worktree.commit_changes(wt, parent_task.goal)
+
+    plan_path = parent_dir / "plan.json"
+    plan = None
+    if plan_path.exists():
+        try:
+            plan = parse_plan(plan_path, parent_task.id)
+        except Exception:
+            pass
+
+    total_in, total_out, total_cost = _aggregate_child_costs(parent_dir, plan)
+    parent_result = Result(
+        task_id=parent_task.id,
+        status="success",
+        summary=parent_task.goal,
+        tokens_in=total_in,
+        tokens_out=total_out,
+        cost_usd=total_cost,
+        duration_s=0.0,
+    )
+    (parent_dir / "result.json").write_text(parent_result.model_dump_json(indent=2))
+
     worktree.prune(env.repo, wt, keep_branch=True)
     dst = env.mas / "tasks" / "done" / parent_task.id
     board.move(parent_dir, dst, reason="role_success")

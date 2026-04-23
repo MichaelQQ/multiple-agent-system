@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `mas cost <task-id>` command prints a per-subtask breakdown of `tokens_in`, `tokens_out`, and `cost_usd`, with a TOTAL row. Exits 1 if the task ID is not found.
+- Adapter token/cost population: the Ollama adapter now calls `pricing.compute_cost_usd()` to populate `cost_usd` in `result.json` based on reported token counts. Providers without token reporting leave the fields `null`.
+- Parent task aggregation: `_finalize_parent` in `tick.py` sums `tokens_in`, `tokens_out`, and `cost_usd` from all subtask `result.json` files and writes an aggregated `result.json` for the parent task before moving it to `done/`. `null` values are treated as 0.
+- `src/mas/pricing.py` module with a `compute_cost_usd(provider, model, tokens_in, tokens_out)` function and a rate table covering `claude-code`, `gemini-cli`, `opencode`, and `codex` providers. Returns `0.0` for unknown providers/models or `None` token counts.
+
 - `mas upgrade` now prints a unified diff for each changed template file and prompts for confirmation before writing. New `-y/--yes` flag skips the prompt.
 - `mas upgrade` detects a running daemon and offers to restart it so the new templates take effect. The previous tick interval is restored from a new `.mas/daemon.interval` sidecar written by `mas daemon start`.
 - `mas.daemon.read_interval(mas)` helper returning the last-started interval (defaults to 300s when missing or corrupt).

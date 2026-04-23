@@ -389,3 +389,26 @@ def test_wrapper_non_json_content_type_writes_failure(tmp_path):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_wrapper_populates_cost_usd_from_token_counts(tmp_path, mock_ollama):
+    """When the API returns prompt_eval_count and eval_count, cost_usd must be non-None.
+
+    Currently fails: wrapper does data.setdefault("cost_usd", None) without
+    calling the pricing module.  After implementation cost_usd must be a float >= 0.
+    """
+    mock_ollama.response_payload = {
+        "response": json.dumps({"status": "success", "summary": "done"}),
+        "done_reason": "stop",
+        "prompt_eval_count": 200,
+        "eval_count": 100,
+    }
+    task_dir, proc = _run_wrapper(tmp_path, mock_ollama.url)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+    result = _read_result(task_dir)
+    assert result["tokens_in"] == 200
+    assert result["tokens_out"] == 100
+    assert result["cost_usd"] is not None, "cost_usd must be computed from tokens, not left as None"
+    assert isinstance(result["cost_usd"], float)
+    assert result["cost_usd"] >= 0.0

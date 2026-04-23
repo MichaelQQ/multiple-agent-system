@@ -485,6 +485,65 @@ def audit(
     console.print(table)
 
 
+@app.command()
+def cost(task_id: str) -> None:
+    """Show per-subtask cost breakdown for a task."""
+    mas = project_dir()
+    located = board.find_task(mas, task_id)
+    if located is None:
+        typer.echo(f"error: task not found: {task_id}")
+        raise typer.Exit(1)
+
+    _, tdir = located
+
+    table = Table("subtask", "role", "tokens_in", "tokens_out", "cost_usd")
+    total_in = 0
+    total_out = 0
+    total_cost = 0.0
+
+    plan_path = tdir / "plan.json"
+    if plan_path.exists():
+        try:
+            plan = board.read_plan(tdir)
+        except Exception:
+            plan = None
+
+        if plan is not None:
+            subtasks_dir = tdir / "subtasks"
+            for spec in plan.subtasks:
+                r = board.read_result(subtasks_dir / spec.id) if subtasks_dir.exists() else None
+                tin = r.tokens_in if r is not None else None
+                tout = r.tokens_out if r is not None else None
+                cusd = r.cost_usd if r is not None else None
+                total_in += tin or 0
+                total_out += tout or 0
+                total_cost += cusd or 0.0
+                table.add_row(
+                    spec.id,
+                    spec.role,
+                    str(tin) if tin is not None else "-",
+                    str(tout) if tout is not None else "-",
+                    f"{cusd:.6f}" if cusd is not None else "-",
+                )
+    else:
+        parent_result = board.read_result(tdir)
+        if parent_result is not None:
+            total_in = parent_result.tokens_in or 0
+            total_out = parent_result.tokens_out or 0
+            total_cost = parent_result.cost_usd or 0.0
+            table.add_row(
+                task_id,
+                "-",
+                str(parent_result.tokens_in) if parent_result.tokens_in is not None else "-",
+                str(parent_result.tokens_out) if parent_result.tokens_out is not None else "-",
+                f"{parent_result.cost_usd:.6f}" if parent_result.cost_usd is not None else "-",
+            )
+
+    table.add_row("TOTAL", "", str(total_in), str(total_out), f"{total_cost:.6f}", style="bold")
+    console.print(table)
+
+
+
 cron_app = typer.Typer(no_args_is_help=True, help="Cron schedule for `mas tick`.")
 app.add_typer(cron_app, name="cron")
 
