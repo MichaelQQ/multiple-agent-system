@@ -288,7 +288,17 @@ class OllamaAdapter(Adapter):
             data["tokens_in"] = prompt_eval_count if data.get("tokens_in") is None else data["tokens_in"]
             data["tokens_out"] = eval_count if data.get("tokens_out") is None else data["tokens_out"]
             data["duration_s"] = duration if not data.get("duration_s") else data["duration_s"]
-            data.setdefault("cost_usd", None)
+            if data.get("cost_usd") is None:
+                _t_in = data.get("tokens_in")
+                _t_out = data.get("tokens_out")
+                if _t_in is not None and _t_out is not None:
+                    try:
+                        from mas.pricing import compute_cost_usd as _compute_cost
+                        data["cost_usd"] = _compute_cost("ollama", model, _t_in, _t_out)
+                    except Exception:
+                        data["cost_usd"] = 0.0
+                else:
+                    data["cost_usd"] = None
 
             out_path = os.path.join(task_dir, "result.json")
             with open(out_path, "w") as fh:

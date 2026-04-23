@@ -1361,3 +1361,149 @@ def test_materialize_plan_invalid_handoff(tmp_path: Path):
 def parse_plan(path: Path, parent_id: str):
     from mas.roles import parse_plan as _parse
     return _parse(path, parent_id)
+
+
+# ---------------------------------------------------------------------------
+# Cost aggregation in _finalize_parent
+# ---------------------------------------------------------------------------
+
+def test_finalize_parent_aggregates_child_costs(tmp_path: Path):
+    """_finalize_parent must write result.json with summed tokens/cost from children.
+
+    Mix of populated and None values — None treated as 0 in aggregation.
+    """
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg())
+
+    parent_id = "20260423-agg-aaaa"
+    parent = _seed_parent(mas, parent_id)
+
+    child1_id = "20260423-c1ag-aaaa"
+    child2_id = "20260423-c2ag-aaaa"
+    child3_id = "20260423-c3ag-aaaa"
+    plan = Plan(
+        parent_id=parent_id,
+        summary="s",
+        subtasks=[
+            SubtaskSpec(id=child1_id, role="implementer", goal="c1"),
+            SubtaskSpec(id=child2_id, role="tester", goal="c2"),
+            SubtaskSpec(id=child3_id, role="evaluator", goal="c3"),
+        ],
+    )
+    (parent / "plan.json").write_text(plan.model_dump_json())
+    subtasks_dir = parent / "subtasks"
+    subtasks_dir.mkdir()
+
+    r1 = Result(task_id=child1_id, status="success", summary="d",
+                tokens_in=100, tokens_out=50, cost_usd=0.01)
+    r2 = Result(task_id=child2_id, status="success", summary="d",
+                tokens_in=200, tokens_out=100, cost_usd=None)
+    r3 = Result(task_id=child3_id, status="success", summary="d",
+                tokens_in=None, tokens_out=None, cost_usd=0.05)
+
+    for cid, r in [(child1_id, r1), (child2_id, r2), (child3_id, r3)]:
+        cd = subtasks_dir / cid
+        cd.mkdir()
+        (cd / "result.json").write_text(r.model_dump_json())
+
+    parent_task = board.read_task(parent)
+    with patch("mas.tick.worktree.commit_changes"), patch("mas.tick.worktree.prune"):
+        _finalize_parent(env, parent, parent_task)
+
+    done_dir = mas / "tasks" / "done" / parent_id
+    result = board.read_result(done_dir)
+
+    assert result is not None, "parent result.json must be written during finalization"
+    assert result.tokens_in == 300, "None tokens treated as 0: 100+200+0"
+    assert result.tokens_out == 150, "None tokens treated as 0: 50+100+0"
+    assert result.cost_usd == pytest.approx(0.06), "None cost treated as 0: 0.01+0.0+0.05"
+
+
+def test_finalize_parent_aggregates_recursively(tmp_path: Path):
+    """Child result.json with its own aggregated costs is included in parent total.
+
+    This tests the recursive case: a child sub-orchestrator whose result.json
+    already contains costs aggregated from its own grandchildren.
+    """
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg())
+
+    parent_id = "20260423-rec-aaaa"
+    parent = _seed_parent(mas, parent_id)
+
+    child_a_id = "20260423-carg-aaaa"
+    child_b_id = "20260423-cbrg-aaaa"
+    plan = Plan(
+        parent_id=parent_id,
+        summary="s",
+        subtasks=[
+            SubtaskSpec(id=child_a_id, role="orchestrator", goal="ca"),
+            SubtaskSpec(id=child_b_id, role="implementer", goal="cb"),
+        ],
+    )
+    (parent / "plan.json").write_text(plan.model_dump_json())
+    subtasks_dir = parent / "subtasks"
+    subtasks_dir.mkdir()
+
+    r_a = Result(task_id=child_a_id, status="success", summary="d",
+                 tokens_in=500, tokens_out=250, cost_usd=0.10)
+    r_b = Result(task_id=child_b_id, status="success", summary="d",
+                 tokens_in=100, tokens_out=50, cost_usd=0.02)
+
+    for cid, r in [(child_a_id, r_a), (child_b_id, r_b)]:
+        cd = subtasks_dir / cid
+        cd.mkdir()
+        (cd / "result.json").write_text(r.model_dump_json())
+
+    parent_task = board.read_task(parent)
+    with patch("mas.tick.worktree.commit_changes"), patch("mas.tick.worktree.prune"):
+        _finalize_parent(env, parent, parent_task)
+
+    done_dir = mas / "tasks" / "done" / parent_id
+    result = board.read_result(done_dir)
+
+    assert result is not None
+    assert result.tokens_in == 600
+    assert result.tokens_out == 300
+    assert result.cost_usd == pytest.approx(0.12)
+
+
+def test_finalize_parent_all_none_costs_yields_zero(tmp_path: Path):
+    """_finalize_parent result.json has cost_usd=0.0 when all children have None cost."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg())
+
+    parent_id = "20260423-null-aaaa"
+    parent = _seed_parent(mas, parent_id)
+
+    child_id = "20260423-nullc-aaaa"
+    plan = Plan(
+        parent_id=parent_id,
+        summary="s",
+        subtasks=[SubtaskSpec(id=child_id, role="implementer", goal="c")],
+    )
+    (parent / "plan.json").write_text(plan.model_dump_json())
+    subtasks_dir = parent / "subtasks"
+    subtasks_dir.mkdir()
+
+    cd = subtasks_dir / child_id
+    cd.mkdir()
+    (cd / "result.json").write_text(
+        Result(task_id=child_id, status="success", summary="d",
+               tokens_in=None, tokens_out=None, cost_usd=None).model_dump_json()
+    )
+
+    parent_task = board.read_task(parent)
+    with patch("mas.tick.worktree.commit_changes"), patch("mas.tick.worktree.prune"):
+        _finalize_parent(env, parent, parent_task)
+
+    done_dir = mas / "tasks" / "done" / parent_id
+    result = board.read_result(done_dir)
+
+    assert result is not None
+    assert result.tokens_in == 0
+    assert result.tokens_out == 0
+    assert result.cost_usd == 0.0
