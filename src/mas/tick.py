@@ -12,7 +12,7 @@ from typing import Iterable
 
 from . import audit, board, transitions, worktree
 from .adapters import AdapterUnavailableError, get_adapter
-from .config import load_config, project_root, project_dir, validate_config
+from .config import load_config, project_root, project_dir, validate_config, ConfigWatcher
 from .ids import task_id as new_task_id
 from .logging import get_task_logger
 from .roles import _list_goals, find_similar_goal, gather_proposer_signals, parse_plan, render_prompt
@@ -47,14 +47,15 @@ def _acquire_lock(mas_dir: Path):
     return fh
 
 
-def run_tick(*, start: Path | None = None) -> None:
+def run_tick(*, start: Path | None = None, cfg: "MasConfig" | None = None) -> None:
     project_root_path = project_root(start)
     mas = project_dir(start)
     if start is not None and (start / ".git").is_dir():
         repo = start
     else:
         repo = project_root_path
-    cfg = load_config(mas)
+    if cfg is None:
+        cfg = load_config(mas)
 
     issues = validate_config(cfg, mas)
     if issues:

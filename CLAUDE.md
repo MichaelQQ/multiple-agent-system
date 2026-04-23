@@ -39,6 +39,8 @@ Each adapter's `build_command()` returns the CLI invocation; `dispatch()` (inher
 
 **CLI** (`src/mas/cli.py`): Typer app. Commands: `init`, `tick`, `show`, `promote`, `retry`, `prune`, `logs`, `tail`, `upgrade`, `cron {install,uninstall,status}`, `daemon {start,stop,status}`.
 
+**ConfigWatcher** (`src/mas/config.py`): Tracks `config.yaml` and `roles.yaml` modification times. Provides `has_changed()` and `mark_checked()` methods. Used by the daemon to implement config hot-reload with fallback on invalid config.
+
 ## Key conventions
 
 - Task IDs: `{yyyymmdd}-{slug}-{hash4}` (generated in `src/mas/ids.py`).
