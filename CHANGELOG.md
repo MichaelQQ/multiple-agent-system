@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Audit logging** — every board move, subtask dispatch, and completion is now appended to `{task_dir}/audit.jsonl` as a structured JSONL event. Fields: `timestamp`, `event`, `role`, `provider`, `task_id`, `subtask_id`, `status`, `duration_s`, `summary`, `details`. Event types: `dispatch`, `completion`, `state_transition`.
+- `mas audit <task-id>` command — display a formatted audit timeline for a task and its subtasks as a Rich table. Supports filtering via `--role`, `--status`, `--since <ISO>`, `--until <ISO>`.
+- `src/mas/audit.py` module with `append_event()` and `read_events()` helpers. `read_events()` skips corrupt lines with a `UserWarning` and supports role/status/since/until filters.
 - `MAS_OLLAMA_TIMEOUT` environment variable (default: 3600s) for controlling HTTP request timeout to the Ollama API.
 - E2E test suite (`tests/e2e/test_lifecycle.py`) covering full lifecycle scenarios, revision cycles, failure recovery, worktree lifecycle, and prior_results propagation. Run with `pytest tests/e2e/ -q`.
 - `ProposalHandoff` model in `src/mas/schemas.py` for typed proposer handoffs
@@ -25,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `board.move()` now appends a `state_transition` audit event to the destination task directory after every column move.
+- `tick._advance_one()` now appends a `dispatch` audit event to the parent task directory after every subtask dispatch.
+- `tick._handle_child_result()` now appends a `completion` audit event to the parent task directory when a subtask result is reaped.
 - `board.read_task()` now uses `model_validate_json()` (strict validation)
 - All schemas use `extra="forbid"` to reject unknown fields
 - `parse_plan()` in `roles.py` now wraps JSON parsing and validation errors with `PlanParseError`, including file path and content snippet

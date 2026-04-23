@@ -56,6 +56,7 @@ def list_column(mas_dir: Path, column: Column) -> list[Path]:
 
 def move(src: Path, dst: Path, *, reason: str = "") -> Path:
     from . import transitions as _tr
+    from . import audit as _audit
     from_state = src.parent.name
     to_state = dst.parent.name
     task_id = src.name
@@ -65,6 +66,13 @@ def move(src: Path, dst: Path, *, reason: str = "") -> Path:
         raise FileExistsError(f"destination exists: {dst}")
     shutil.move(str(src), str(dst))
     log.info("task moved", extra={"task_id": task_id, "from_column": from_state, "to_column": to_state, "reason": reason})
+    _audit.append_event(
+        dst,
+        event="state_transition",
+        task_id=task_id,
+        summary=f"{from_state} → {to_state} ({reason})" if reason else f"{from_state} → {to_state}",
+        details={"reason": reason},
+    )
     return dst
 
 
