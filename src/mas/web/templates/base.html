@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{% block title %}mas{% endblock %}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; color: #222; background: #fafafa; }
+    header { padding: 10px 16px; background: #222; color: #eee; display: flex; justify-content: space-between; align-items: center; }
+    header a { color: #eee; text-decoration: none; margin-right: 12px; }
+    main { padding: 16px; }
+    h1, h2, h3 { margin: 0.5em 0; }
+    .columns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .column { background: white; border: 1px solid #ddd; border-radius: 6px; padding: 10px; min-height: 120px; }
+    .column h2 { font-size: 14px; text-transform: uppercase; color: #666; }
+    .task { border: 1px solid #e5e5e5; border-radius: 4px; padding: 6px 8px; margin-bottom: 6px; background: #fcfcfc; }
+    .task a { color: #1d4ed8; text-decoration: none; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+    .task a:hover { text-decoration: underline; }
+    .meta { font-size: 11px; color: #777; }
+    .goal { margin-top: 2px; font-size: 13px; }
+    table { border-collapse: collapse; width: 100%; background: white; margin: 8px 0; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eee; font-size: 13px; vertical-align: top; }
+    th { background: #f5f5f5; font-weight: 600; font-size: 12px; text-transform: uppercase; color: #555; }
+    pre { background: #1a1a1a; color: #e0e0e0; padding: 10px; border-radius: 4px; overflow: auto; font-size: 12px; max-height: 480px; }
+    .actions form { display: inline; margin-right: 6px; }
+    button, .btn { background: #222; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+    button.secondary { background: #666; }
+    button.danger { background: #b91c1c; }
+    button:hover { opacity: 0.9; }
+    .status-pass, .status-success { color: #059669; }
+    .status-pending { color: #b45309; }
+    .status-fail, .status-failure { color: #b91c1c; }
+    .status-needs_revision { color: #7c3aed; }
+    .status-environment_error { color: #6b7280; }
+    .pill { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 11px; background: #eee; color: #333; }
+    .daemon-on { color: #059669; }
+    .daemon-off { color: #b45309; }
+  </style>
+</head>
+<body>
+<header>
+  <div>
+    <a href="/"><strong>mas</strong></a>
+    <span class="meta">{{ project or "" }}</span>
+  </div>
+  <div>
+    {% block headeractions %}{% endblock %}
+  </div>
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

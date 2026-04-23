@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}{{ task_id }}{% endblock %}
+
+{% block content %}
+<h1>{{ task_id }} <span class="pill">{{ column }}</span> <span class="pill">{{ task.role }}</span></h1>
+<p>{{ task.goal }}</p>
+
+<div class="actions">
+  {% if column == "proposed" %}
+    <form method="post" action="/task/{{ task_id }}/promote"><button>Promote to doing</button></form>
+  {% endif %}
+  {% if column == "failed" %}
+    <form method="post" action="/task/{{ task_id }}/retry"><button>Retry</button></form>
+  {% endif %}
+</div>
+
+{% if result %}
+<h2>Top-level result</h2>
+<table>
+  <tr><th>status</th><td class="status-{{ result.status }}">{{ result.status }}</td></tr>
+  {% if result.verdict %}<tr><th>verdict</th><td class="status-{{ result.verdict }}">{{ result.verdict }}</td></tr>{% endif %}
+  <tr><th>summary</th><td>{{ result.summary }}</td></tr>
+  {% if result.tokens_in is not none %}<tr><th>tokens in/out</th><td>{{ result.tokens_in }} / {{ result.tokens_out }}</td></tr>{% endif %}
+  {% if result.cost_usd is not none %}<tr><th>cost</th><td>${{ "%.6f"|format(result.cost_usd) }}</td></tr>{% endif %}
+</table>
+{% endif %}
+
+{% if subtasks %}
+<h2>Subtasks</h2>
+<table>
+  <tr><th>id</th><th>role</th><th>status</th><th>goal</th><th>summary</th><th>tokens</th><th>cost</th></tr>
+  {% for s in subtasks %}
+    <tr>
+      <td><code>{{ s.id }}</code></td>
+      <td>{{ s.role }}</td>
+      <td class="status-{{ s.status }}">{{ s.status }}</td>
+      <td>{{ s.goal[:80] }}</td>
+      <td>{{ s.summary[:120] }}</td>
+      <td class="meta">{% if s.tokens_in is not none %}{{ s.tokens_in }}/{{ s.tokens_out }}{% endif %}</td>
+      <td class="meta">{% if s.cost_usd is not none %}${{ "%.6f"|format(s.cost_usd) }}{% endif %}</td>
+    </tr>
+  {% endfor %}
+  {% if cost_totals %}
+    <tr>
+      <th colspan="5">TOTAL</th>
+      <th>{{ cost_totals.tokens_in }}/{{ cost_totals.tokens_out }}</th>
+      <th>${{ "%.6f"|format(cost_totals.cost_usd) }}</th>
+    </tr>
+  {% endif %}
+</table>
+{% endif %}
+
+{% if logs %}
+<h2>Logs</h2>
+<p class="meta">
+  {% for lg in logs %}
+    <a href="#" onclick="showLog('{{ lg }}'); return false;">{{ lg }}</a>&nbsp;&nbsp;
+  {% endfor %}
+</p>
+<pre id="log-view">(select a log above)</pre>
+<script>
+  const TASK_ID = {{ task_id|tojson }};
+  async function showLog(name) {
+    const r = await fetch(`/task/${TASK_ID}/log/${name}?lines=500`);
+    document.getElementById('log-view').textContent = await r.text();
+  }
+  {% if logs %}showLog({{ logs[-1]|tojson }});{% endif %}
+</script>
+{% endif %}
+
+{% if audit %}
+<h2>Audit</h2>
+<table>
+  <tr><th>timestamp</th><th>event</th><th>role</th><th>provider</th><th>subtask</th><th>status</th><th>summary</th></tr>
+  {% for e in audit %}
+    <tr>
+      <td class="meta">{{ e.timestamp }}</td>
+      <td>{{ e.event }}</td>
+      <td>{{ e.role }}</td>
+      <td>{{ e.provider }}</td>
+      <td><code>{{ e.subtask_id }}</code></td>
+      <td class="status-{{ e.status }}">{{ e.status }}</td>
+      <td>{{ e.summary[:120] }}</td>
+    </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+{% if transitions %}
+<h2>Transitions</h2>
+<table>
+  <tr><th>timestamp</th><th>from</th><th>to</th><th>reason</th></tr>
+  {% for t in transitions %}
+    <tr><td class="meta">{{ t.timestamp }}</td><td>{{ t.from_state }}</td><td>{{ t.to_state }}</td><td>{{ t.reason }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endblock %}

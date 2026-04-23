@@ -600,5 +600,31 @@ def daemon_status() -> None:
         typer.echo(f"stale pid file (pid {pid} not alive)")
 
 
+@app.command()
+def web(
+    host: str = typer.Option("127.0.0.1", "--host", help="Interface to bind (default loopback)"),
+    port: int = typer.Option(8765, "--port", help="Port to bind"),
+    reload: bool = typer.Option(False, "--reload", help="Enable uvicorn auto-reload (dev)"),
+) -> None:
+    """Serve a local web UI for monitoring the board and triggering actions."""
+    try:
+        import uvicorn
+    except ImportError:
+        typer.echo('web deps missing — install with: pip install "mas[web]"')
+        raise typer.Exit(1)
+
+    from .web.app import create_app
+
+    proj = project_root()
+    typer.echo(f"mas web serving {proj} on http://{host}:{port}")
+    uvicorn.run(
+        create_app(proj),
+        host=host,
+        port=port,
+        reload=reload,
+        log_level="info",
+    )
+
+
 if __name__ == "__main__":
     app()

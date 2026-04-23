@@ -10,6 +10,14 @@ dependencies = [
     "rich>=13.7",
 ]
 
+[project.optional-dependencies]
+web = [
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
+]
+
 [project.scripts]
 mas = "mas.cli:app"
 
@@ -22,6 +30,7 @@ packages = ["src/mas"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "templates" = "mas/_templates"
+"src/mas/web/templates" = "mas/web/templates"
 
 [dependency-groups]
 dev = [
