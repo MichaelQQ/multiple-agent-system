@@ -544,6 +544,60 @@ def cost(task_id: str) -> None:
 
 
 
+@app.command()
+def stats(
+    since: str | None = typer.Option(
+        None,
+        "--since",
+        help="Limit to tasks with a transition within this window (e.g. 1h, 2d, 1w).",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON instead of Rich table."),
+) -> None:
+    """Show board statistics: counts, success rate, duration, tokens, and cost."""
+    import json as _json
+    from .stats import compute_stats, parse_since
+
+    if since is not None:
+        try:
+            parse_since(since)
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc), param_hint="'--since'")
+
+    mas = project_dir()
+    data = compute_stats(mas, since=since)
+
+    if json_output:
+        typer.echo(_json.dumps(data))
+        return
+
+    # Text output — use typer.echo so output is captured by CliRunner
+    b = data["board"]
+    typer.echo("Board:")
+    for col in ("proposed", "doing", "done", "failed"):
+        typer.echo(f"  {col}: {b[col]}")
+
+    typer.echo(f"success_rate: {data['success_rate']:.1%}  revision_rate: {data['revision_rate']:.1%}")
+
+    if data["roles"]:
+        typer.echo("Durations by role:")
+        for role_name, rs in sorted(data["roles"].items()):
+            typer.echo(
+                f"  {role_name}: count={rs['count']} mean={rs['mean_s']:.1f}s"
+                f" p50={rs['p50_s']:.1f}s p95={rs['p95_s']:.1f}s"
+            )
+
+    if data["providers"]:
+        typer.echo("Providers:")
+        for pname, cnt in sorted(data["providers"].items()):
+            typer.echo(f"  {pname}: {cnt}")
+
+    tk = data["tokens"]
+    typer.echo(
+        f"tokens_in: {tk['tokens_in']}  tokens_out: {tk['tokens_out']}  cost_usd: {tk['cost_usd']:.4f}"
+    )
+    typer.echo(f"env_errors: {data['env_errors']}")
+
+
 cron_app = typer.Typer(no_args_is_help=True, help="Cron schedule for `mas tick`.")
 app.add_typer(cron_app, name="cron")
 

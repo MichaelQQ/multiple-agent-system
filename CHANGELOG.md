@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `mas stats` command — prints aggregate board counts, success/revision rates, per-role timing (mean/p50/p95), per-provider task counts, cumulative token/cost totals, and environment-error counts across all board columns. Flags: `--since <duration>` (e.g. `24h`, `7d`, `2w`) to filter by recency; `--json` to emit raw JSON instead of a Rich table.
+- `src/mas/stats.py` module — `compute_stats(mas_dir, since)` that walks all four board columns and aggregates the stats structure above. `parse_since(s)` parses h/d/w duration strings.
+
 - `mas cost <task-id>` command prints a per-subtask breakdown of `tokens_in`, `tokens_out`, and `cost_usd`, with a TOTAL row. Exits 1 if the task ID is not found.
 - Adapter token/cost population: the Ollama adapter now calls `pricing.compute_cost_usd()` to populate `cost_usd` in `result.json` based on reported token counts. Providers without token reporting leave the fields `null`.
 - Parent task aggregation: `_finalize_parent` in `tick.py` sums `tokens_in`, `tokens_out`, and `cost_usd` from all subtask `result.json` files and writes an aggregated `result.json` for the parent task before moving it to `done/`. `null` values are treated as 0.

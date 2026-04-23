@@ -52,6 +52,7 @@ mas retry   <id>              # failed/    → doing/
 mas logs    <id> [-f]         # tail the latest worker log
 mas audit   <id>              # display structured audit timeline for a task
 mas cost    <id>              # print per-subtask token/cost breakdown
+mas stats                     # print aggregate board/role/provider/token statistics
 ```
 
 ### Observability
@@ -136,6 +137,28 @@ mas cost <task-id>            # print per-subtask token/cost breakdown with tota
 ```
 
 Providers that do not report token usage leave `tokens_in`, `tokens_out`, and `cost_usd` as `null` in `result.json`; the aggregation treats `null` as 0. Cost rates are defined in `src/mas/pricing.py` — add new provider/model entries there to enable cost calculation.
+
+## Stats
+
+```sh
+mas stats                     # aggregate stats across all board columns
+mas stats --since 7d          # only tasks with activity in the last 7 days
+mas stats --since 24h         # last 24 hours (also accepts: h, d, w suffixes)
+mas stats --json              # emit raw JSON instead of a Rich table
+```
+
+`mas stats` scans all four board columns (`proposed`, `doing`, `done`, `failed`) and prints a summary table covering:
+
+| Section | Fields |
+|---------|--------|
+| Board counts | tasks per column |
+| Rates | success rate, revision rate |
+| Role timing | mean / p50 / p95 duration (seconds) per role |
+| Provider usage | task count per provider |
+| Token totals | `tokens_in`, `tokens_out`, `cost_usd` |
+| Environment errors | tasks with `status=environment_error` or env-retry markers |
+
+With `--json` the output is a single JSON object — useful for piping into `jq` or dashboards.
 
 ## Upgrading templates
 
@@ -324,7 +347,7 @@ See `tests/e2e/scripts/` for examples of role scripts.
 
 ## Scope of v1
 
-Implemented: init, validate, tick, show, promote, retry, logs, cron install/uninstall/
+Implemented: init, validate, tick, show, promote, retry, logs, cost, stats, audit, cron install/uninstall/
 status, daemon start/stop/status. Out of scope (v2): `mas pr`, `mas kill`,
-`mas prune`, `mas stats`, `mas doctor`, launchd, parallel child execution,
+`mas prune`, `mas doctor`, launchd, parallel child execution,
 auto-PR/merge.
