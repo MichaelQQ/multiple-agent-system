@@ -573,7 +573,45 @@ def _materialize_proposal(env: TickEnv, result: Result) -> None:
 
     task = Task(id=tid, role="orchestrator", goal=goal, inputs=inputs)
     board.write_task(target, task)
+    _write_proposal_doc(target, task)
     tlog.info("materialized proposal %s", tid)
+
+
+def _write_proposal_doc(target: Path, task: Task) -> None:
+    """Write a human-readable `task.md` alongside `task.json` for proposed tasks."""
+    lines: list[str] = [f"# {task.goal}", ""]
+    lines.append(f"- **Task ID:** `{task.id}`")
+    lines.append(f"- **Role:** {task.role}")
+    lines.append(f"- **Created:** {task.created_at.isoformat(timespec='seconds')}")
+    lines.append("")
+
+    rationale = task.inputs.get("rationale")
+    if rationale:
+        lines += ["## Rationale", "", str(rationale).strip(), ""]
+
+    acceptance = task.inputs.get("acceptance")
+    if acceptance:
+        lines.append("## Acceptance criteria")
+        lines.append("")
+        if isinstance(acceptance, list):
+            for item in acceptance:
+                lines.append(f"- {item}")
+        else:
+            for line in str(acceptance).splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                lines.append(line if line.startswith(("-", "*")) else f"- {line}")
+        lines.append("")
+
+    suggested = task.inputs.get("suggested_changes")
+    if suggested:
+        lines += ["## Suggested changes", ""]
+        for item in suggested:
+            lines.append(f"- {item}")
+        lines.append("")
+
+    (target / "task.md").write_text("\n".join(lines).rstrip() + "\n")
 
 
 def _materialize_plan(parent_dir: Path, result: Result) -> bool:

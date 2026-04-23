@@ -983,6 +983,59 @@ def test_materialize_proposal_creates_task(tmp_path: Path):
     assert task.goal == "build a new widget"
 
 
+def test_materialize_proposal_writes_human_readable_doc(tmp_path: Path):
+    """Materialized proposal includes a task.md with goal, rationale, acceptance."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    result = Result(
+        task_id="prop-doc",
+        status="success",
+        summary="build a thing",
+        handoff={
+            "goal": "build a new widget",
+            "rationale": "users keep asking for widgets",
+            "acceptance": ["widget renders", "widget persists"],
+            "suggested_changes": ["add Widget model", "expose /widgets endpoint"],
+        },
+    )
+
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg(max_proposed=5))
+    _materialize_proposal(env, result)
+
+    (proposed,) = list((mas / "tasks" / "proposed").iterdir())
+    doc = (proposed / "task.md").read_text()
+    assert "# build a new widget" in doc
+    assert "Task ID" in doc and proposed.name in doc
+    assert "## Rationale" in doc
+    assert "users keep asking for widgets" in doc
+    assert "## Acceptance criteria" in doc
+    assert "- widget renders" in doc
+    assert "## Suggested changes" in doc
+    assert "- add Widget model" in doc
+
+
+def test_materialize_proposal_doc_omits_empty_sections(tmp_path: Path):
+    """task.md only includes sections for fields that are present."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    result = Result(
+        task_id="prop-minimal",
+        status="success",
+        summary="t",
+        handoff={"goal": "just a goal"},
+    )
+
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg(max_proposed=5))
+    _materialize_proposal(env, result)
+
+    (proposed,) = list((mas / "tasks" / "proposed").iterdir())
+    doc = (proposed / "task.md").read_text()
+    assert "# just a goal" in doc
+    assert "## Rationale" not in doc
+    assert "## Acceptance criteria" not in doc
+    assert "## Suggested changes" not in doc
+
+
 def test_materialize_proposal_respects_max_proposed(tmp_path: Path):
     """At max_proposed, no new task is created."""
     mas = tmp_path / ".mas"
