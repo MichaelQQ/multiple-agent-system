@@ -286,8 +286,22 @@ mas web --host 127.0.0.1 --port 8765
 ```
 
 The local UI shows the board, task details, recent audit events, cost totals,
-and log tails. It also exposes the same basic actions as the CLI: promote,
-retry, trigger a tick, start/stop the daemon, and prune completed worktrees.
+and log tails. Tasks within each column are sorted by most recent transition
+(newest first). The header navigation exposes four pages:
+
+| Page        | Route       | Purpose                                                           |
+|-------------|-------------|-------------------------------------------------------------------|
+| Board       | `/`         | Kanban view; run tick, start/stop daemon, prune, upgrade          |
+| Events      | `/events`   | Cross-task audit feed with `task/role/status/event/limit` filters |
+| Validate    | `/validate` | Runs `validate_environment` and shows providers/roles summary     |
+| Cron        | `/cron`     | Inspect, install, and uninstall the per-project cron entry        |
+
+Actions available from the board and task pages mirror the CLI: `tick`,
+`promote`, `retry`, `prune`, `daemon start/stop`, and `upgrade` (runs
+`mas upgrade --yes` in a detached subprocess). The task detail page shows
+plan/subtasks, audit timeline, transitions, cost totals with the per-task
+budget row, and a tabbed log viewer.
+
 It is designed for local loopback use and has no auth layer.
 
 ## Layout

@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}validate{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h1 style="margin:0 0 8px">Validate</h1>
+  {% if error %}
+    <p><span class="status-fail">error</span> {{ error }}</p>
+  {% elif issues %}
+    <p><span class="status-fail">failed</span> {{ issues|length }} issue(s)</p>
+    <table>
+      <tr><th>field</th><th>message</th></tr>
+      {% for i in issues %}
+        <tr>
+          <td class="mono">{{ i.field }}</td>
+          <td>{{ i.message }}</td>
+        </tr>
+      {% endfor %}
+    </table>
+  {% else %}
+    <p><span class="status-pass">passed</span> all providers and prompt templates are available.</p>
+  {% endif %}
+</div>
+
+{% if cfg_summary %}
+<div class="card">
+  <h3 style="margin-top:0">Config summary</h3>
+  <dl class="kv">
+    <dt>providers</dt><dd class="mono">{{ cfg_summary.providers|join(", ") or "—" }}</dd>
+    <dt>roles</dt><dd class="mono">{{ cfg_summary.roles|join(", ") or "—" }}</dd>
+  </dl>
+</div>
+{% endif %}
+{% endblock %}

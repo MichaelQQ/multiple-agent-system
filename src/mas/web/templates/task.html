@@ -2,96 +2,129 @@
 {% block title %}{{ task_id }}{% endblock %}
 
 {% block content %}
-<h1>{{ task_id }} <span class="pill">{{ column }}</span> <span class="pill">{{ task.role }}</span></h1>
-<p>{{ task.goal }}</p>
+<div class="card">
+  <div class="task-header">
+    <span class="task-id">{{ task_id }}</span>
+    <span class="pill pill-{{ column }}">{{ column }}</span>
+    <span class="pill pill-role">{{ task.role }}</span>
+    {% if task.cycle %}<span class="pill">cycle {{ task.cycle }}</span>{% endif %}
+    {% if task.attempt and task.attempt > 1 %}<span class="pill">attempt {{ task.attempt }}</span>{% endif %}
+  </div>
+  <p class="task-goal">{{ task.goal }}</p>
 
-<div class="actions">
-  {% if column == "proposed" %}
-    <form method="post" action="/task/{{ task_id }}/promote"><button>Promote to doing</button></form>
-  {% endif %}
-  {% if column == "failed" %}
-    <form method="post" action="/task/{{ task_id }}/retry"><button>Retry</button></form>
-  {% endif %}
+  <div class="actions" style="margin-top:14px">
+    {% if column == "proposed" %}
+      <form method="post" action="/task/{{ task_id }}/promote"><button>Promote to doing</button></form>
+    {% endif %}
+    {% if column == "failed" %}
+      <form method="post" action="/task/{{ task_id }}/retry"><button>Retry</button></form>
+    {% endif %}
+    <a href="/"><button type="button" class="ghost">← Board</button></a>
+  </div>
 </div>
 
 {% if result %}
 <h2>Top-level result</h2>
 <table>
-  <tr><th>status</th><td class="status-{{ result.status }}">{{ result.status }}</td></tr>
-  {% if result.verdict %}<tr><th>verdict</th><td class="status-{{ result.verdict }}">{{ result.verdict }}</td></tr>{% endif %}
+  <tr><th style="width:140px">status</th><td><span class="status-{{ result.status }}">{{ result.status }}</span></td></tr>
+  {% if result.verdict %}<tr><th>verdict</th><td><span class="status-{{ result.verdict }}">{{ result.verdict }}</span></td></tr>{% endif %}
   <tr><th>summary</th><td>{{ result.summary }}</td></tr>
-  {% if result.tokens_in is not none %}<tr><th>tokens in/out</th><td>{{ result.tokens_in }} / {{ result.tokens_out }}</td></tr>{% endif %}
-  {% if result.cost_usd is not none %}<tr><th>cost</th><td>${{ "%.6f"|format(result.cost_usd) }}</td></tr>{% endif %}
+  {% if result.tokens_in is not none %}<tr><th>tokens in/out</th><td class="mono">{{ result.tokens_in }} / {{ result.tokens_out }}</td></tr>{% endif %}
+  {% if result.cost_usd is not none %}<tr><th>cost</th><td class="mono">${{ "%.6f"|format(result.cost_usd) }}</td></tr>{% endif %}
 </table>
 {% endif %}
 
 {% if subtasks %}
-<h2>Subtasks</h2>
+<h2>Subtasks <span class="pill">{{ subtasks|length }}</span></h2>
 <table>
-  <tr><th>id</th><th>role</th><th>status</th><th>goal</th><th>summary</th><th>tokens</th><th>cost</th></tr>
+  <tr>
+    <th>id</th><th>role</th><th>status</th><th>goal</th><th>summary</th><th>tokens</th><th>cost</th>
+  </tr>
   {% for s in subtasks %}
     <tr>
       <td><code>{{ s.id }}</code></td>
-      <td>{{ s.role }}</td>
-      <td class="status-{{ s.status }}">{{ s.status }}</td>
-      <td>{{ s.goal[:80] }}</td>
-      <td>{{ s.summary[:120] }}</td>
-      <td class="meta">{% if s.tokens_in is not none %}{{ s.tokens_in }}/{{ s.tokens_out }}{% endif %}</td>
-      <td class="meta">{% if s.cost_usd is not none %}${{ "%.6f"|format(s.cost_usd) }}{% endif %}</td>
+      <td><span class="pill pill-role">{{ s.role }}</span></td>
+      <td><span class="status-{{ s.status }}">{{ s.status }}</span></td>
+      <td>{{ s.goal[:80] }}{% if s.goal|length > 80 %}…{% endif %}</td>
+      <td>{{ s.summary[:120] }}{% if s.summary|length > 120 %}…{% endif %}</td>
+      <td class="mono">{% if s.tokens_in is not none %}{{ s.tokens_in }}/{{ s.tokens_out }}{% else %}—{% endif %}</td>
+      <td class="mono">{% if s.cost_usd is not none %}${{ "%.6f"|format(s.cost_usd) }}{% else %}—{% endif %}</td>
     </tr>
   {% endfor %}
   {% if cost_totals %}
-    <tr>
-      <th colspan="5">TOTAL</th>
-      <th>{{ cost_totals.tokens_in }}/{{ cost_totals.tokens_out }}</th>
-      <th>${{ "%.6f"|format(cost_totals.cost_usd) }}</th>
+    <tr style="background: var(--surface-alt); font-weight: 600;">
+      <td colspan="5" style="text-align:right">TOTAL</td>
+      <td class="mono">{{ cost_totals.tokens_in }}/{{ cost_totals.tokens_out }}</td>
+      <td class="mono">${{ "%.6f"|format(cost_totals.cost_usd) }}</td>
     </tr>
+    {% if budget %}
+    <tr>
+      <td colspan="5" style="text-align:right; color: var(--text-muted);">BUDGET</td>
+      <td colspan="2" class="mono">
+        ${{ "%.6f"|format(cost_totals.cost_usd) }} / ${{ "%.6f"|format(budget) }}
+        ({{ "%.1f"|format(cost_totals.cost_usd / budget * 100 if budget > 0 else 0) }}%)
+      </td>
+    </tr>
+    {% endif %}
   {% endif %}
 </table>
 {% endif %}
 
 {% if logs %}
 <h2>Logs</h2>
-<p class="meta">
+<div class="log-tabs">
   {% for lg in logs %}
-    <a href="#" onclick="showLog('{{ lg }}'); return false;">{{ lg }}</a>&nbsp;&nbsp;
+    <a href="#" onclick="showLog('{{ lg }}', this); return false;" data-log="{{ lg }}">{{ lg }}</a>
   {% endfor %}
-</p>
-<pre id="log-view">(select a log above)</pre>
+</div>
+<pre id="log-view">(loading…)</pre>
 <script>
   const TASK_ID = {{ task_id|tojson }};
-  async function showLog(name) {
+  async function showLog(name, el) {
     const r = await fetch(`/task/${TASK_ID}/log/${name}?lines=500`);
     document.getElementById('log-view').textContent = await r.text();
+    document.querySelectorAll('.log-tabs a').forEach(a => a.classList.remove('active'));
+    if (el) el.classList.add('active');
+    else {
+      const match = document.querySelector(`.log-tabs a[data-log="${name}"]`);
+      if (match) match.classList.add('active');
+    }
   }
   {% if logs %}showLog({{ logs[-1]|tojson }});{% endif %}
 </script>
 {% endif %}
 
 {% if audit %}
-<h2>Audit</h2>
+<h2>Audit <span class="pill">{{ audit|length }}</span></h2>
 <table>
-  <tr><th>timestamp</th><th>event</th><th>role</th><th>provider</th><th>subtask</th><th>status</th><th>summary</th></tr>
+  <tr>
+    <th>timestamp</th><th>event</th><th>role</th><th>provider</th><th>subtask</th><th>status</th><th>summary</th>
+  </tr>
   {% for e in audit %}
     <tr>
-      <td class="meta">{{ e.timestamp }}</td>
+      <td class="mono" style="white-space:nowrap">{{ e.timestamp }}</td>
       <td>{{ e.event }}</td>
       <td>{{ e.role }}</td>
       <td>{{ e.provider }}</td>
       <td><code>{{ e.subtask_id }}</code></td>
-      <td class="status-{{ e.status }}">{{ e.status }}</td>
-      <td>{{ e.summary[:120] }}</td>
+      <td>{% if e.status %}<span class="status-{{ e.status }}">{{ e.status }}</span>{% endif %}</td>
+      <td>{{ e.summary[:120] }}{% if e.summary|length > 120 %}…{% endif %}</td>
     </tr>
   {% endfor %}
 </table>
 {% endif %}
 
 {% if transitions %}
-<h2>Transitions</h2>
+<h2>Transitions <span class="pill">{{ transitions|length }}</span></h2>
 <table>
   <tr><th>timestamp</th><th>from</th><th>to</th><th>reason</th></tr>
   {% for t in transitions %}
-    <tr><td class="meta">{{ t.timestamp }}</td><td>{{ t.from_state }}</td><td>{{ t.to_state }}</td><td>{{ t.reason }}</td></tr>
+    <tr>
+      <td class="mono" style="white-space:nowrap">{{ t.timestamp }}</td>
+      <td><span class="pill pill-{{ t.from_state }}">{{ t.from_state }}</span></td>
+      <td><span class="pill pill-{{ t.to_state }}">{{ t.to_state }}</span></td>
+      <td>{{ t.reason }}</td>
+    </tr>
   {% endfor %}
 </table>
 {% endif %}

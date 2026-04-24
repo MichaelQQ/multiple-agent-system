@@ -6,7 +6,6 @@ used by the CLI (board.move, daemon.start/stop). Bind to 127.0.0.1; no auth.
 """
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 from datetime import datetime
@@ -17,9 +16,10 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from .. import board, daemon, transitions, worktree
+from .. import board, cron, daemon, transitions, worktree
 from ..audit import read_events
-from ..config import project_dir, project_root
+from ..config import load_config, project_dir, project_root, validate_environment
+from ..events import read_board_events
 
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
 
@@ -30,6 +30,13 @@ def _fmt_local(ts: str) -> str:
     except ValueError:
         return ts[:19]
     return dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _parse_ts(ts: str) -> datetime | None:
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
 
 
 def _subtask_status(child_dir: Path) -> str:
@@ -53,11 +60,15 @@ def _board_rows(mas: Path) -> dict[str, list[dict[str, Any]]]:
                 t = board.read_task(tdir)
                 goal = t.goal
                 role = t.role
+                created_at = t.created_at.astimezone().strftime("%Y-%m-%d %H:%M")
             except Exception:
                 goal = "(unreadable)"
                 role = "?"
+                created_at = ""
             latest_txn = transitions.read_transitions(tdir, limit=1)
-            last_move = _fmt_local(latest_txn[-1].timestamp) if latest_txn else ""
+            last_move_ts = latest_txn[-1].timestamp if latest_txn else ""
+            last_move = _fmt_local(last_move_ts) if last_move_ts else ""
+            sort_key = _parse_ts(last_move_ts) or datetime.min
             progress = ""
             if col == "doing":
                 progress = _progress_counts(tdir)
@@ -66,10 +77,13 @@ def _board_rows(mas: Path) -> dict[str, list[dict[str, Any]]]:
                     "id": tdir.name,
                     "role": role,
                     "goal": goal,
+                    "created_at": created_at,
                     "last_move": last_move,
+                    "sort_key": sort_key,
                     "progress": progress,
                 }
             )
+        rows[col].sort(key=lambda r: r["sort_key"], reverse=True)
     return rows
 
 
@@ -167,12 +181,15 @@ def _task_detail(mas: Path, task_id: str) -> dict[str, Any]:
     if log_dir.exists():
         logs = sorted(p.name for p in log_dir.glob("*.log"))
 
+    budget = getattr(task, "cost_budget_usd", None)
+
     return {
         "column": col,
         "task": task,
         "result": result,
         "subtasks": subtasks,
         "cost_totals": cost_totals,
+        "budget": budget,
         "transitions": txns,
         "audit": audit,
         "logs": logs,
@@ -191,13 +208,13 @@ def _read_log_tail(log_path: Path, lines: int = 400) -> str:
     return "\n".join(tail)
 
 
-def _spawn_tick(project: Path) -> int:
-    """Launch `mas tick` as a detached subprocess, mirroring daemon's pattern."""
-    log_path = project_dir(project) / "logs" / "web-tick.log"
+def _spawn_detached(project: Path, argv: list[str], log_name: str) -> int:
+    """Launch a `mas` subcommand as a detached subprocess."""
+    log_path = project_dir(project) / "logs" / log_name
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_f = open(log_path, "ab", buffering=0)
     proc = subprocess.Popen(
-        [sys.executable, "-m", "mas.cli", "tick"],
+        [sys.executable, "-m", "mas.cli", *argv],
         cwd=str(project),
         stdin=subprocess.DEVNULL,
         stdout=log_f,
@@ -206,6 +223,10 @@ def _spawn_tick(project: Path) -> int:
         close_fds=True,
     )
     return proc.pid
+
+
+def _spawn_tick(project: Path) -> int:
+    return _spawn_detached(project, ["tick"], "web-tick.log")
 
 
 def create_app(project: Path | None = None) -> FastAPI:
@@ -217,8 +238,15 @@ def create_app(project: Path | None = None) -> FastAPI:
     templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
 
     @app.get("/", response_class=HTMLResponse)
-    def index(request: Request):
+    def index(request: Request, tick_pid: int | None = None, pruned: int | None = None, upgrade_pid: int | None = None):
         pid, running = daemon.status(proj)
+        flash = None
+        if tick_pid:
+            flash = f"tick dispatched (pid {tick_pid})"
+        elif pruned is not None:
+            flash = f"pruned {pruned} worktree(s)"
+        elif upgrade_pid:
+            flash = f"upgrade dispatched (pid {upgrade_pid})"
         return templates.TemplateResponse(
             request,
             "board.html",
@@ -228,6 +256,7 @@ def create_app(project: Path | None = None) -> FastAPI:
                 "daemon_pid": pid,
                 "daemon_running": running,
                 "project": str(proj),
+                "flash": flash,
             },
         )
 
@@ -239,6 +268,7 @@ def create_app(project: Path | None = None) -> FastAPI:
             "task.html",
             {
                 "task_id": task_id,
+                "project": str(proj),
                 **detail,
             },
         )
@@ -249,13 +279,109 @@ def create_app(project: Path | None = None) -> FastAPI:
         if located is None:
             raise HTTPException(404, f"task not found: {task_id}")
         _, tdir = located
-        # Prevent traversal; log_name must be a bare filename in logs/.
         if "/" in log_name or ".." in log_name:
             raise HTTPException(400, "invalid log name")
         log_path = tdir / "logs" / log_name
         if not log_path.exists():
             raise HTTPException(404, f"log not found: {log_name}")
         return _read_log_tail(log_path, lines=lines)
+
+    @app.get("/events", response_class=HTMLResponse)
+    def events_view(
+        request: Request,
+        task: str | None = None,
+        role: str | None = None,
+        status: str | None = None,
+        event: str | None = None,
+        limit: int = 200,
+    ):
+        try:
+            evts = read_board_events(mas, task=task, role=role, status=status, event=event)
+        except Exception:
+            evts = []
+        evts = list(reversed(evts))[:limit]
+        rendered = [
+            {
+                "timestamp": _fmt_local(e.get("timestamp") or ""),
+                "task_id": e.get("task_id") or "",
+                "event": e.get("event") or "",
+                "role": e.get("role") or "",
+                "provider": e.get("provider") or "",
+                "status": e.get("status") or "",
+                "summary": e.get("summary") or "",
+            }
+            for e in evts
+        ]
+        return templates.TemplateResponse(
+            request,
+            "events.html",
+            {
+                "events": rendered,
+                "filters": {"task": task or "", "role": role or "", "status": status or "", "event": event or ""},
+                "limit": limit,
+                "project": str(proj),
+            },
+        )
+
+    @app.get("/validate", response_class=HTMLResponse)
+    def validate_view(request: Request):
+        try:
+            issues = validate_environment(mas)
+        except Exception as e:
+            issues = []
+            error = str(e)
+        else:
+            error = None
+        try:
+            cfg = load_config(mas)
+            cfg_summary = {
+                "providers": sorted(cfg.providers.keys()) if hasattr(cfg, "providers") and cfg.providers else [],
+                "roles": sorted(cfg.roles.keys()) if hasattr(cfg, "roles") and cfg.roles else [],
+            }
+        except Exception:
+            cfg_summary = None
+        return templates.TemplateResponse(
+            request,
+            "validate.html",
+            {
+                "issues": [{"field": i.field, "message": i.message} for i in issues],
+                "error": error,
+                "cfg_summary": cfg_summary,
+                "project": str(proj),
+            },
+        )
+
+    @app.get("/cron", response_class=HTMLResponse)
+    def cron_view(request: Request, msg: str | None = None):
+        try:
+            status_text = cron.status(proj)
+        except Exception as e:
+            status_text = f"error: {e}"
+        return templates.TemplateResponse(
+            request,
+            "cron.html",
+            {
+                "status_text": status_text,
+                "msg": msg,
+                "project": str(proj),
+            },
+        )
+
+    @app.post("/cron/install")
+    def cron_install(interval: int = 5):
+        try:
+            cron.install(proj, interval_minutes=interval)
+        except Exception as e:
+            raise HTTPException(500, f"cron install failed: {e}")
+        return RedirectResponse(f"/cron?msg=installed+({interval}m)", status_code=303)
+
+    @app.post("/cron/uninstall")
+    def cron_uninstall():
+        try:
+            cron.uninstall(proj)
+        except Exception as e:
+            raise HTTPException(500, f"cron uninstall failed: {e}")
+        return RedirectResponse("/cron?msg=uninstalled", status_code=303)
 
     @app.post("/task/{task_id}/promote")
     def promote(task_id: str):
@@ -295,6 +421,16 @@ def create_app(project: Path | None = None) -> FastAPI:
     def tick():
         pid = _spawn_tick(proj)
         return RedirectResponse(f"/?tick_pid={pid}", status_code=303)
+
+    @app.post("/upgrade")
+    def upgrade():
+        pid = _spawn_detached(proj, ["upgrade", "--yes"], "web-upgrade.log")
+        return RedirectResponse(f"/?upgrade_pid={pid}", status_code=303)
+
+    @app.get("/daemon/status")
+    def daemon_status_endpoint():
+        pid, running = daemon.status(proj)
+        return {"pid": pid, "running": running}
 
     @app.post("/daemon/start")
     def daemon_start(interval: int = 300):

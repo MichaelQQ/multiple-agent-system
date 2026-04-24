@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}cron{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h1 style="margin:0 0 10px">Cron</h1>
+  {% if msg %}<div class="flash">{{ msg }}</div>{% endif %}
+
+  <h3 style="margin-top:0">Current status</h3>
+  <pre style="max-height: 200px">{{ status_text }}</pre>
+
+  <h3>Actions</h3>
+  <div class="actions">
+    <form method="post" action="/cron/install">
+      <label>interval (min):
+        <input type="number" name="interval" value="5" min="1" style="width:70px">
+      </label>
+      <button>Install</button>
+    </form>
+    <form method="post" action="/cron/uninstall" onsubmit="return confirm('Uninstall cron entry for this project?')">
+      <button class="danger">Uninstall</button>
+    </form>
+  </div>
+  <p style="color: var(--text-muted); font-size: 12px; margin-top: 8px;">
+    Cron entries are scoped per project (hash of absolute path). Installing again updates the schedule.
+  </p>
+</div>
+{% endblock %}

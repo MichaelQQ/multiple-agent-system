@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}events{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h1 style="margin:0 0 10px">Events <span class="pill">{{ events|length }}</span></h1>
+  <form method="get" action="/events" class="filter-bar">
+    <input type="text" name="task"   placeholder="task id"   value="{{ filters.task }}">
+    <input type="text" name="role"   placeholder="role"      value="{{ filters.role }}">
+    <input type="text" name="status" placeholder="status"    value="{{ filters.status }}">
+    <input type="text" name="event"  placeholder="event"     value="{{ filters.event }}">
+    <input type="number" name="limit" value="{{ limit }}" min="10" max="2000" style="width:90px" title="max rows">
+    <button>Filter</button>
+    <a href="/events"><button type="button" class="ghost">Clear</button></a>
+  </form>
+</div>
+
+{% if events %}
+<table>
+  <tr>
+    <th>timestamp</th><th>task</th><th>event</th><th>role</th><th>provider</th><th>status</th><th>summary</th>
+  </tr>
+  {% for e in events %}
+    <tr>
+      <td class="mono" style="white-space:nowrap">{{ e.timestamp }}</td>
+      <td><a href="/task/{{ e.task_id }}" class="mono">{{ e.task_id }}</a></td>
+      <td>{{ e.event }}</td>
+      <td>{{ e.role }}</td>
+      <td>{{ e.provider }}</td>
+      <td>{% if e.status %}<span class="status-{{ e.status }}">{{ e.status }}</span>{% endif %}</td>
+      <td>{{ e.summary[:160] }}{% if e.summary|length > 160 %}…{% endif %}</td>
+    </tr>
+  {% endfor %}
+</table>
+{% else %}
+<div class="card"><p style="color: var(--text-muted); margin: 0;">no events found</p></div>
+{% endif %}
+{% endblock %}

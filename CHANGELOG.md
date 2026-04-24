@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Web UI parity with CLI**: the web app now exposes the remaining CLI commands and gets a visual refresh.
+  - New routes: `GET /events` (cross-task event feed with `task/role/status/event/limit` filters, reuses `read_board_events`), `GET /validate` (runs `validate_environment` and shows a providers/roles summary), `GET /cron` + `POST /cron/install` + `POST /cron/uninstall` (drives `mas.cron`), `POST /upgrade` (spawns detached `mas upgrade --yes`), and `GET /daemon/status` (JSON).
+  - Board tasks are sorted by most recent transition (newest first), per column.
+  - Refreshed templates (`base.html`, `board.html`, `task.html`, new `events.html` / `validate.html` / `cron.html`): CSS-variable palette, header nav (Board / Events / Validate / Cron), colored status pills, per-column left-border accents on task cards, tabbed log viewer with an active-tab indicator, budget row in the subtask totals, and flash messages on the board for tick/prune/upgrade.
+
 - `mas show --json` / `mas show <id> --json` — new `--json` flag emits a pretty-printed JSON document on stdout instead of the Rich table/tree, suitable for dashboards and CI scripts. Board view returns a list of task objects; task view returns a single object with subtask plan details. Unknown task IDs with `--json` print `{"error": "not found: <id>"}` and exit 1.
 
 - **Per-task cost budget**: `Task.cost_budget_usd` (optional `float`) sets a USD spending cap for a single task. `MasConfig.default_cost_budget_usd` (optional `float`) sets the project-wide default applied when a task does not specify its own budget.
