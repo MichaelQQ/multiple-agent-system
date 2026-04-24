@@ -19,7 +19,7 @@ Python 3.11+. `mise.toml` pins 3.12. No linter/formatter configured yet.
 
 ## Architecture
 
-**Tick loop** (`src/mas/tick.py`): The core. Single-pass, flock-guarded. Sequence: acquire lock → reap dead workers → advance doing/ tasks → maybe dispatch proposer → release lock. Each task in `doing/` is advanced through a state machine: ensure worktree → dispatch orchestrator → orchestrator writes `plan.json` with subtask specs → dispatch subtasks sequentially (implementer → tester → evaluator) → finalize parent to `done/`.
+**Tick loop** (`src/mas/tick.py`): The core. Single-pass, flock-guarded. Sequence: acquire lock → reap dead workers → advance doing/ tasks → maybe dispatch proposer → release lock. Each task in `doing/` is advanced through a state machine: ensure worktree → dispatch orchestrator → orchestrator writes `plan.json` with subtask specs → dispatch subtasks sequentially (implementer → tester → evaluator) → finalize parent to `done/`. A `.current_subtask` marker file is written on subtask dispatch and cleaned up when the result is collected.
 
 **Board** (`src/mas/board.py`): Directory-as-kanban helpers. Four columns: `proposed/`, `doing/`, `done/`, `failed/`. Moves are `shutil.move` with transition logging. PID files track live workers (`pids/{role}.{provider}.pid`).
 
@@ -37,7 +37,9 @@ Each adapter's `build_command()` returns the CLI invocation; `dispatch()` (inher
 
 **Worktree** (`src/mas/worktree.py`): Git worktree per parent task on branch `mas/{task_id}`. Shared across all subtasks of that parent. Pruned on completion (branch preserved).
 
-**CLI** (`src/mas/cli.py`): Typer app. Commands: `init`, `tick`, `show`, `promote`, `retry`, `prune`, `logs`, `tail`, `upgrade`, `cron {install,uninstall,status}`, `daemon {start,stop,status}`.
+**CLI** (`src/mas/cli.py`): Typer app. Commands: `init`, `tick`, `show`, `promote`, `retry`, `prune`, `logs`, `tail`, `upgrade`, `cron {install,uninstall,status}`, `daemon {start,stop,status}`, `web`.
+
+**Web** (`src/mas/web/app.py`): Flask app. Renders board, task details (reads `.current_subtask` marker to show executing subtask), audit events, and cost totals. Exposes UI actions.
 
 ## Key conventions
 

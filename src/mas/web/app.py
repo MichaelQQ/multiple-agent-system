@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from .. import board, daemon, transitions, worktree
+from .. import board, current_subtask, daemon, transitions, worktree
 from ..audit import read_events
 from ..config import project_dir, project_root
 
@@ -167,6 +167,12 @@ def _task_detail(mas: Path, task_id: str) -> dict[str, Any]:
     if log_dir.exists():
         logs = sorted(p.name for p in log_dir.glob("*.log"))
 
+    marker = _read_current_subtask_marker(tdir)
+    current_subtask_info = None
+    if marker is not None:
+        elapsed = _get_elapsed_s(marker["start_time_iso"])
+        current_subtask_info = {**marker, "elapsed_s": elapsed}
+
     return {
         "column": col,
         "task": task,
@@ -177,6 +183,7 @@ def _task_detail(mas: Path, task_id: str) -> dict[str, Any]:
         "audit": audit,
         "logs": logs,
         "task_dir": tdir,
+        "current_subtask": current_subtask_info,
     }
 
 
@@ -318,6 +325,7 @@ def _reset_task_state(task_dir: Path) -> None:
     (task_dir / ".orchestrator_attempt").unlink(missing_ok=True)
     (task_dir / ".previous_failure").unlink(missing_ok=True)
     (task_dir / "plan.json").unlink(missing_ok=True)
+    (task_dir / ".current_subtask").unlink(missing_ok=True)
     subtasks_root = task_dir / "subtasks"
     if subtasks_root.exists():
         for child_dir in subtasks_root.iterdir():
@@ -330,3 +338,11 @@ def _reset_task_state(task_dir: Path) -> None:
             attempt_file = child_dir / ".attempt"
             if attempt_file.exists():
                 attempt_file.write_text("1")
+
+
+def _read_current_subtask_marker(tdir: Path) -> dict | None:
+    return current_subtask._read_current_subtask_marker(tdir)
+
+
+def _get_elapsed_s(start_time_iso: str) -> float:
+    return current_subtask._get_elapsed_s(start_time_iso)

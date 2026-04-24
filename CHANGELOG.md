@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Current subtask visibility** — The web UI now displays which subtask is currently executing on each task card, showing role, provider, PID, and elapsed time. Marker files (`.current_subtask`) are written during subtask dispatch and cleaned up on result collection.
 - `mas cost <task-id>` command prints a per-subtask breakdown of `tokens_in`, `tokens_out`, and `cost_usd`, with a TOTAL row. Exits 1 if the task ID is not found.
 - Adapter token/cost population: the Ollama adapter now calls `pricing.compute_cost_usd()` to populate `cost_usd` in `result.json` based on reported token counts. Providers without token reporting leave the fields `null`.
 - Parent task aggregation: `_finalize_parent` in `tick.py` sums `tokens_in`, `tokens_out`, and `cost_usd` from all subtask `result.json` files and writes an aggregated `result.json` for the parent task before moving it to `done/`. `null` values are treated as 0.

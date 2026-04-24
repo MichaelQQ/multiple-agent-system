@@ -201,7 +201,7 @@ mas web --host 127.0.0.1 --port 8765
 ```
 
 The local UI shows the board, task details, recent audit events, cost totals,
-and log tails. It also exposes the same basic actions as the CLI: promote,
+and log tails. **Task detail views now display the currently executing subtask**, showing role, provider, PID, and elapsed time. It also exposes the same basic actions as the CLI: promote,
 retry, trigger a tick, start/stop the daemon, and prune completed worktrees.
 It is designed for local loopback use and has no auth layer.
 
