@@ -26,3 +26,8 @@ providers:
 proposer_signals:
   # Optional command to run for CI/test output (stdout+stderr sampled).
   # ci_command: ["pytest", "-x", "-q"]
+
+# webhooks:
+#   - url: https://hooks.example.com/mas
+#     events: ["done", "failed"]   # column names or "from->to" transitions
+#     timeout_s: 10                # 1..120

@@ -182,3 +182,19 @@ class TestErrorMessages:
         friendly = exc_info.value.to_user_friendly()
         assert "Hint" in friendly
         assert "config.yaml" in friendly or "roles.yaml" in friendly
+
+
+class TestMalformedWebhooksEntry:
+    def test_negative_timeout_s_raises_validation_error(self, mas_dir, monkeypatch):
+        """A webhook entry with a negative timeout_s must be rejected at load time."""
+        cfg = copy.deepcopy(VALID_CONFIG)
+        cfg["webhooks"] = [{"url": "http://example.com/hook", "timeout_s": -5}]
+        write_yaml(mas_dir / "config.yaml", cfg)
+        write_yaml(mas_dir / "roles.yaml", {"roles": cfg["roles"]})
+        monkeypatch.chdir(mas_dir.parent)
+        with pytest.raises(ConfigValidationError) as exc_info:
+            load_config(project=mas_dir)
+        error_str = str(exc_info.value).lower()
+        assert "timeout" in error_str or "webhook" in error_str, (
+            f"expected error mentioning 'timeout' or 'webhook', got: {exc_info.value}"
+        )

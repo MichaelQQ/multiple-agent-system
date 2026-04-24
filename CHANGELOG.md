@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Webhooks**: outbound HTTP notifications on board transitions. Configure `webhooks` in `.mas/config.yaml` with `url`, `events` (column names or `from->to` strings), and `timeout_s`. Payloads include `task_id`, `role`, `goal`, `from`, `to`, `summary`, `status`, `timestamp`, and `task_dir`. Delivery is best-effort and non-blocking; errors are logged at `WARNING` and never interrupt the tick loop.
+
 - **Config hot-reload for daemon**: The daemon now automatically detects changes to `.mas/config.yaml` and `.mas/roles.yaml` without requiring a restart. Before each tick cycle, it checks the config file modification time and reloads if changed. If the new config is invalid (malformed YAML, missing required fields, unknown provider), the daemon keeps the previous valid configuration and logs a warning.
 
 - `mas cost <task-id>` command prints a per-subtask breakdown of `tokens_in`, `tokens_out`, and `cost_usd`, with a TOTAL row. Exits 1 if the task ID is not found.
