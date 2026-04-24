@@ -40,6 +40,7 @@ class Task(BaseModel):
     cycle: int = 0
     attempt: int = 1
     created_at: datetime = Field(default_factory=_now)
+    cost_budget_usd: float | None = None
 
     @field_validator("id")
     @classmethod
@@ -165,6 +166,7 @@ class MasConfig(BaseModel):
     proposer_signals: dict[str, Any] = Field(default_factory=dict)
     max_proposed: int = 10
     proposal_similarity_threshold: float = 0.7
+    default_cost_budget_usd: float | None = None
 
     @field_validator("proposer_signals", mode="before")
     @classmethod

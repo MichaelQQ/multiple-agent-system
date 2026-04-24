@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-task cost budget**: `Task.cost_budget_usd` (optional `float`) sets a USD spending cap for a single task. `MasConfig.default_cost_budget_usd` (optional `float`) sets the project-wide default applied when a task does not specify its own budget.
+- **Cost budget short-circuit in tick**: Before dispatching the next subtask, `_advance_one()` sums `cost_usd` from all completed child `result.json` files. If the running total meets or exceeds the effective budget (`task.cost_budget_usd` takes precedence over `config.default_cost_budget_usd`), the tick writes a failure `result.json` with `summary="cost budget exceeded"` and a `handoff` containing `spent_usd`, `budget_usd`, and `last_completed_subtask_id`, then moves the parent task to `failed/` with transition reason `cost_budget_exceeded` without dispatching further work.
+- **`mas cost` budget column**: When `cost_budget_usd` is set on the parent task, `mas cost <task-id>` now prints a `Budget:` line showing `spent / budget (% utilized)` after the per-subtask table.
+
 - **Config hot-reload for daemon**: The daemon now automatically detects changes to `.mas/config.yaml` and `.mas/roles.yaml` without requiring a restart. Before each tick cycle, it checks the config file modification time and reloads if changed. If the new config is invalid (malformed YAML, missing required fields, unknown provider), the daemon keeps the previous valid configuration and logs a warning.
 
 - `mas cost <task-id>` command prints a per-subtask breakdown of `tokens_in`, `tokens_out`, and `cost_usd`, with a TOTAL row. Exits 1 if the task ID is not found.

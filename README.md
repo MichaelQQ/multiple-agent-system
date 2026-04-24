@@ -146,6 +146,17 @@ mas cost <task-id>            # print per-subtask token/cost breakdown with tota
 
 Providers that do not report token usage leave `tokens_in`, `tokens_out`, and `cost_usd` as `null` in `result.json`; the aggregation treats `null` as 0. Cost rates are defined in `src/mas/pricing.py` — add new provider/model entries there to enable cost calculation.
 
+### Cost budgets
+
+You can cap spending per task or project-wide:
+
+- **Per-task**: set `cost_budget_usd` in the task's `task.json` (optional `float`).
+- **Project default**: set `default_cost_budget_usd` in `.mas/config.yaml` (optional `float`). The per-task value takes precedence when both are set.
+
+When the running total of `cost_usd` across completed subtasks reaches the effective budget, the tick loop stops dispatching further subtasks, writes a failure `result.json` (`summary: "cost budget exceeded"`, `handoff` with `spent_usd`, `budget_usd`, and `last_completed_subtask_id`), and moves the parent task to `failed/` with transition reason `cost_budget_exceeded`.
+
+`mas cost <task-id>` shows a `Budget:` line (e.g., `Budget: 0.012300 / 0.050000 (24.6% utilized)`) when `cost_budget_usd` is set on the task.
+
 ## Upgrading templates
 
 ```sh
