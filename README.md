@@ -65,6 +65,7 @@ mas prune                     # prune leftover worktrees under done/ and failed/
 mas audit   <id>              # display structured audit timeline for a task
 mas events  [--follow] [--json] [filters…]  # aggregate events across all tasks
 mas cost    <id>              # print per-subtask token/cost breakdown
+mas stats                     # print aggregate board/role/provider/token statistics
 ```
 
 ### Observability
@@ -225,6 +226,28 @@ You can cap spending per task or project-wide:
 When the running total of `cost_usd` across completed subtasks reaches the effective budget, the tick loop stops dispatching further subtasks, writes a failure `result.json` (`summary: "cost budget exceeded"`, `handoff` with `spent_usd`, `budget_usd`, and `last_completed_subtask_id`), and moves the parent task to `failed/` with transition reason `cost_budget_exceeded`.
 
 `mas cost <task-id>` shows a `Budget:` line (e.g., `Budget: 0.012300 / 0.050000 (24.6% utilized)`) when `cost_budget_usd` is set on the task.
+
+## Stats
+
+```sh
+mas stats                     # aggregate stats across all board columns
+mas stats --since 7d          # only tasks with activity in the last 7 days
+mas stats --since 24h         # last 24 hours (also accepts: h, d, w suffixes)
+mas stats --json              # emit raw JSON instead of a Rich table
+```
+
+`mas stats` scans all four board columns (`proposed`, `doing`, `done`, `failed`) and prints a summary table covering:
+
+| Section | Fields |
+|---------|--------|
+| Board counts | tasks per column |
+| Rates | success rate, revision rate |
+| Role timing | mean / p50 / p95 duration (seconds) per role |
+| Provider usage | task count per provider |
+| Token totals | `tokens_in`, `tokens_out`, `cost_usd` |
+| Environment errors | tasks with `status=environment_error` or env-retry markers |
+
+With `--json` the output is a single JSON object — useful for piping into `jq` or dashboards.
 
 ## Upgrading templates
 
@@ -433,6 +456,7 @@ See `tests/e2e/scripts/` for examples of role scripts.
 ## Scope of v1
 
 Implemented: `init`, `upgrade`, `validate`, `tick`, `show`, `promote`,
-`retry`, `delete`, `logs`, `tail`, `audit`, `cost`, `prune`, `cron`,
-`daemon`, and the optional `web` UI. Out of scope (v2): `mas pr`, `mas kill`, `mas stats`,
-`mas doctor`, launchd, parallel child execution, auto-PR/merge.
+`retry`, `delete`, `logs`, `tail`, `audit`, `cost`, `stats`, `prune`,
+`cron`, `daemon`, and the optional `web` UI. Out of scope (v2):
+`mas pr`, `mas kill`, `mas doctor`, launchd, parallel child execution,
+auto-PR/merge.
