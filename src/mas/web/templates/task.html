@@ -10,7 +10,7 @@
     {% if task.cycle %}<span class="pill">cycle {{ task.cycle }}</span>{% endif %}
     {% if task.attempt and task.attempt > 1 %}<span class="pill">attempt {{ task.attempt }}</span>{% endif %}
   </div>
-  <p class="task-goal">{{ task.goal }}</p>
+  <div class="task-goal markdown-body">{{ task.goal | md }}</div>
 
   <div class="actions" style="margin-top:14px">
     {% if column == "proposed" %}
@@ -19,16 +19,47 @@
     {% if column == "failed" %}
       <form method="post" action="/task/{{ task_id }}/retry"><button>Retry</button></form>
     {% endif %}
+    <form method="post" action="/task/{{ task_id }}/delete"
+          onsubmit="return confirm('Delete task {{ task_id }} from {{ column }}/? This cannot be undone.');">
+      <button class="danger">Delete</button>
+    </form>
     <a href="/"><button type="button" class="ghost">← Board</button></a>
   </div>
 </div>
+
+<details class="card" open>
+  <summary><strong>Task info</strong></summary>
+  <table style="margin-top:10px">
+    <tr><th style="width:160px">id</th><td class="mono">{{ task.id }}</td></tr>
+    <tr><th>role</th><td><span class="pill pill-role">{{ task.role }}</span></td></tr>
+    <tr><th>column</th><td><span class="pill pill-{{ column }}">{{ column }}</span></td></tr>
+    {% if task.parent_id %}<tr><th>parent</th><td class="mono"><a href="/task/{{ task.parent_id }}">{{ task.parent_id }}</a></td></tr>{% endif %}
+    <tr><th>created</th><td class="mono">{{ task.created_at.astimezone().strftime('%Y-%m-%d %H:%M:%S') }}</td></tr>
+    <tr><th>cycle / attempt</th><td class="mono">{{ task.cycle }} / {{ task.attempt }}</td></tr>
+    {% if task.cost_budget_usd is not none %}<tr><th>budget</th><td class="mono">${{ "%.6f"|format(task.cost_budget_usd) }}</td></tr>{% endif %}
+  </table>
+
+  {% if task.inputs %}
+    <h3 style="margin-top:16px">Inputs</h3>
+    <pre class="mono">{{ task.inputs | tojson(indent=2) }}</pre>
+  {% endif %}
+  {% if task.constraints %}
+    <h3 style="margin-top:16px">Constraints</h3>
+    <pre class="mono">{{ task.constraints | tojson(indent=2) }}</pre>
+  {% endif %}
+  {% if task.previous_failure %}
+    <h3 style="margin-top:16px">Previous failure</h3>
+    <div class="markdown-body">{{ task.previous_failure | md }}</div>
+  {% endif %}
+</details>
 
 {% if result %}
 <h2>Top-level result</h2>
 <table>
   <tr><th style="width:140px">status</th><td><span class="status-{{ result.status }}">{{ result.status }}</span></td></tr>
   {% if result.verdict %}<tr><th>verdict</th><td><span class="status-{{ result.verdict }}">{{ result.verdict }}</span></td></tr>{% endif %}
-  <tr><th>summary</th><td>{{ result.summary }}</td></tr>
+  <tr><th>summary</th><td><div class="markdown-body">{{ result.summary | md }}</div></td></tr>
+  {% if result.feedback %}<tr><th>feedback</th><td><div class="markdown-body">{{ result.feedback | md }}</div></td></tr>{% endif %}
   {% if result.tokens_in is not none %}<tr><th>tokens in/out</th><td class="mono">{{ result.tokens_in }} / {{ result.tokens_out }}</td></tr>{% endif %}
   {% if result.cost_usd is not none %}<tr><th>cost</th><td class="mono">${{ "%.6f"|format(result.cost_usd) }}</td></tr>{% endif %}
 </table>
@@ -45,8 +76,8 @@
       <td><code>{{ s.id }}</code></td>
       <td><span class="pill pill-role">{{ s.role }}</span></td>
       <td><span class="status-{{ s.status }}">{{ s.status }}</span></td>
-      <td>{{ s.goal[:80] }}{% if s.goal|length > 80 %}…{% endif %}</td>
-      <td>{{ s.summary[:120] }}{% if s.summary|length > 120 %}…{% endif %}</td>
+      <td><details><summary>{{ s.goal[:80] }}{% if s.goal|length > 80 %}…{% endif %}</summary><div class="markdown-body">{{ s.goal | md }}</div></details></td>
+      <td>{% if s.summary %}<details><summary>{{ s.summary[:120] }}{% if s.summary|length > 120 %}…{% endif %}</summary><div class="markdown-body">{{ s.summary | md }}</div></details>{% endif %}</td>
       <td class="mono">{% if s.tokens_in is not none %}{{ s.tokens_in }}/{{ s.tokens_out }}{% else %}—{% endif %}</td>
       <td class="mono">{% if s.cost_usd is not none %}${{ "%.6f"|format(s.cost_usd) }}{% else %}—{% endif %}</td>
     </tr>

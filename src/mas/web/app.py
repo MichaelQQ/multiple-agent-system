@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -229,6 +229,23 @@ def _spawn_tick(project: Path) -> int:
     return _spawn_detached(project, ["tick"], "web-tick.log")
 
 
+def _render_markdown(text: str | None) -> str:
+    if not text:
+        return ""
+    try:
+        import markdown as _md
+        from markupsafe import Markup
+    except ImportError:
+        from html import escape
+        return f"<pre>{escape(text)}</pre>"
+    html = _md.markdown(
+        text,
+        extensions=["fenced_code", "tables", "nl2br", "sane_lists"],
+        output_format="html5",
+    )
+    return Markup(html)
+
+
 def create_app(project: Path | None = None) -> FastAPI:
     """Build a FastAPI app bound to the given project (or the cwd's mas project)."""
     proj = (project or project_root()).resolve()
@@ -236,9 +253,10 @@ def create_app(project: Path | None = None) -> FastAPI:
 
     app = FastAPI(title="mas web", docs_url=None, redoc_url=None)
     templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
+    templates.env.filters["md"] = _render_markdown
 
     @app.get("/", response_class=HTMLResponse)
-    def index(request: Request, tick_pid: int | None = None, pruned: int | None = None, upgrade_pid: int | None = None):
+    def index(request: Request, tick_pid: int | None = None, pruned: int | None = None, upgrade_pid: int | None = None, deleted: str | None = None, deleted_count: int | None = None):
         pid, running = daemon.status(proj)
         flash = None
         if tick_pid:
@@ -247,6 +265,10 @@ def create_app(project: Path | None = None) -> FastAPI:
             flash = f"pruned {pruned} worktree(s)"
         elif upgrade_pid:
             flash = f"upgrade dispatched (pid {upgrade_pid})"
+        elif deleted:
+            flash = f"deleted task {deleted}"
+        elif deleted_count is not None:
+            flash = f"deleted {deleted_count} task(s)"
         return templates.TemplateResponse(
             request,
             "board.html",
@@ -401,6 +423,27 @@ def create_app(project: Path | None = None) -> FastAPI:
         board.move(src, dst, reason="web_retry")
         _reset_task_state(dst)
         return RedirectResponse(f"/task/{task_id}", status_code=303)
+
+    @app.post("/task/{task_id}/delete")
+    def delete_task(task_id: str):
+        try:
+            board.delete_task(mas, task_id, project_root=proj)
+        except FileNotFoundError:
+            raise HTTPException(404, f"task not found: {task_id}")
+        return RedirectResponse("/?deleted=" + task_id, status_code=303)
+
+    @app.post("/tasks/delete")
+    def delete_tasks(task_ids: list[str] = Form(default=[])):
+        if not task_ids:
+            return RedirectResponse("/", status_code=303)
+        deleted = 0
+        for tid in task_ids:
+            try:
+                board.delete_task(mas, tid, project_root=proj)
+                deleted += 1
+            except FileNotFoundError:
+                continue
+        return RedirectResponse(f"/?deleted_count={deleted}", status_code=303)
 
     @app.post("/prune")
     def prune():

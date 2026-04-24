@@ -41,6 +41,13 @@
   </div>
 </div>
 
+<form method="post" action="/tasks/delete" id="bulk-form"
+      onsubmit="return confirmBulkDelete(this);">
+  <div class="bulk-bar" style="display:flex; align-items:center; gap:12px; margin:8px 0;">
+    <label><input type="checkbox" id="bulk-select-all" onclick="toggleAll(this)"> select all</label>
+    <span id="bulk-count" style="color:var(--text-muted); font-size:12px;">0 selected</span>
+    <button type="submit" class="danger" id="bulk-delete-btn" disabled>Delete selected</button>
+  </div>
 <div class="columns">
   {% for col in columns %}
     <section class="column col-{{ col }}">
@@ -51,13 +58,18 @@
       {% if rows[col] %}
         {% for r in rows[col] %}
           <div class="task">
-            <a class="id" href="/task/{{ r.id }}">{{ r.id }}</a>
-            <div class="meta">
-              <span class="pill pill-role">{{ r.role }}</span>
-              {% if r.progress %}<span class="sep">·</span><span>{{ r.progress }}</span>{% endif %}
-              {% if r.last_move %}<span class="sep">·</span><span title="last move">⟳ {{ r.last_move }}</span>{% endif %}
-            </div>
-            <div class="goal">{{ r.goal[:180] }}{% if r.goal|length > 180 %}…{% endif %}</div>
+            <label style="display:flex; gap:8px; align-items:flex-start;">
+              <input type="checkbox" name="task_ids" value="{{ r.id }}" class="bulk-check" onclick="updateBulk()">
+              <span style="flex:1">
+                <a class="id" href="/task/{{ r.id }}">{{ r.id }}</a>
+                <div class="meta">
+                  <span class="pill pill-role">{{ r.role }}</span>
+                  {% if r.progress %}<span class="sep">·</span><span>{{ r.progress }}</span>{% endif %}
+                  {% if r.last_move %}<span class="sep">·</span><span title="last move">⟳ {{ r.last_move }}</span>{% endif %}
+                </div>
+                <div class="goal">{{ r.goal[:180] }}{% if r.goal|length > 180 %}…{% endif %}</div>
+              </span>
+            </label>
           </div>
         {% endfor %}
       {% else %}
@@ -66,4 +78,26 @@
     </section>
   {% endfor %}
 </div>
+</form>
+
+<script>
+  function updateBulk() {
+    const checks = document.querySelectorAll('.bulk-check');
+    const selected = document.querySelectorAll('.bulk-check:checked');
+    document.getElementById('bulk-count').textContent = selected.length + ' selected';
+    document.getElementById('bulk-delete-btn').disabled = selected.length === 0;
+    const all = document.getElementById('bulk-select-all');
+    all.checked = checks.length > 0 && selected.length === checks.length;
+    all.indeterminate = selected.length > 0 && selected.length < checks.length;
+  }
+  function toggleAll(src) {
+    document.querySelectorAll('.bulk-check').forEach(c => c.checked = src.checked);
+    updateBulk();
+  }
+  function confirmBulkDelete(form) {
+    const n = form.querySelectorAll('input[name="task_ids"]:checked').length;
+    if (n === 0) return false;
+    return confirm(`Delete ${n} task(s)? This cannot be undone.`);
+  }
+</script>
 {% endblock %}

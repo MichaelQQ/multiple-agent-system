@@ -102,6 +102,49 @@ def test_task_view_shows_plan_and_subtasks(project: Path, client: TestClient):
     assert "dispatched" in body
 
 
+def test_task_view_renders_goal_as_markdown(project: Path, client: TestClient):
+    mas = project / ".mas"
+    task_id = "20260424-mdgo-aaaa"
+    tdir = board.task_dir(mas, "doing", task_id)
+    tdir.mkdir(parents=True)
+    goal = "## Heading\n\n- item one\n- item two\n\n```py\nprint('hi')\n```"
+    board.write_task(tdir, Task(id=task_id, role="implementer", goal=goal))
+
+    r = client.get(f"/task/{task_id}")
+    assert r.status_code == 200
+    body = r.text
+    assert "<h2>Heading</h2>" in body
+    assert "<li>item one</li>" in body
+    assert "<code" in body and "language-py" in body
+
+
+def test_task_view_shows_task_info_fields(project: Path, client: TestClient):
+    mas = project / ".mas"
+    task_id = "20260424-info-bbbb"
+    tdir = board.task_dir(mas, "doing", task_id)
+    tdir.mkdir(parents=True)
+    board.write_task(
+        tdir,
+        Task(
+            id=task_id,
+            role="implementer",
+            goal="g",
+            inputs={"key": "val"},
+            constraints={"budget": 10},
+            previous_failure="**boom** happened",
+            cycle=2,
+            attempt=3,
+        ),
+    )
+    r = client.get(f"/task/{task_id}")
+    assert r.status_code == 200
+    body = r.text
+    assert "Task info" in body
+    assert "key" in body and "val" in body
+    assert "budget" in body
+    assert "<strong>boom</strong>" in body
+
+
 def test_task_view_404_for_missing(client: TestClient):
     r = client.get("/task/20260423-nope-ffff")
     assert r.status_code == 404
@@ -131,6 +174,71 @@ def test_retry_moves_failed_to_doing_and_resets(project: Path, client: TestClien
     assert moved.is_dir()
     assert not (moved / "result.json").exists()
     assert not (moved / "plan.json").exists()
+
+
+def test_delete_removes_task_from_any_column(project: Path, client: TestClient):
+    mas = project / ".mas"
+    for col in ("proposed", "doing", "done", "failed"):
+        task_id = f"20260424-del{col[0]}-aaaa"
+        tdir = _put_task(mas, col, task_id)
+        r = client.post(f"/task/{task_id}/delete", follow_redirects=False)
+        assert r.status_code == 303, f"{col}: {r.text}"
+        assert f"deleted={task_id}" in r.headers["location"]
+        assert not tdir.exists()
+
+
+def test_delete_missing_task_returns_404(client: TestClient):
+    r = client.post("/task/20260424-nope-0000/delete", follow_redirects=False)
+    assert r.status_code == 404
+
+
+def test_bulk_delete_removes_multiple_tasks(project: Path, client: TestClient):
+    mas = project / ".mas"
+    ids = [
+        "20260424-bulkp-aaaa",
+        "20260424-bulkd-bbbb",
+        "20260424-bulko-cccc",
+    ]
+    _put_task(mas, "proposed", ids[0])
+    _put_task(mas, "doing", ids[1])
+    _put_task(mas, "done", ids[2])
+
+    r = client.post(
+        "/tasks/delete",
+        data={"task_ids": ids},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert "deleted_count=3" in r.headers["location"]
+    for tid in ids:
+        assert board.find_task(mas, tid) is None
+
+
+def test_bulk_delete_skips_missing_and_counts_existing(project: Path, client: TestClient):
+    mas = project / ".mas"
+    real = "20260424-bulk-dead"
+    _put_task(mas, "proposed", real)
+    r = client.post(
+        "/tasks/delete",
+        data={"task_ids": [real, "20260424-nope-0000"]},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert "deleted_count=1" in r.headers["location"]
+
+
+def test_bulk_delete_with_no_selection_redirects(client: TestClient):
+    r = client.post("/tasks/delete", data={}, follow_redirects=False)
+    assert r.status_code == 303
+
+
+def test_board_renders_bulk_delete_form(project: Path, client: TestClient):
+    mas = project / ".mas"
+    _put_task(mas, "proposed", "20260424-render-aaaa")
+    r = client.get("/")
+    assert r.status_code == 200
+    assert 'action="/tasks/delete"' in r.text
+    assert 'name="task_ids"' in r.text
 
 
 def test_tick_spawns_subprocess(project: Path, client: TestClient, monkeypatch):

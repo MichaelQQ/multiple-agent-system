@@ -58,6 +58,7 @@ mas show <id>                 # render one task's subtask tree
 mas show <id> --json          # emit task details as pretty-printed JSON
 mas promote <id>              # proposed/  → doing/  (human approval gate)
 mas retry   <id>              # failed/    → doing/
+mas delete  <id> [<id>…] [-y] # remove tasks from any column (proposed/doing/done/failed)
 mas logs    <id> [-f]         # print/follow the latest worker log
 mas tail    <id> [-n 50] [-f] # tail task logs with line control
 mas prune                     # prune leftover worktrees under done/ and failed/
@@ -297,10 +298,16 @@ and log tails. Tasks within each column are sorted by most recent transition
 | Cron        | `/cron`     | Inspect, install, and uninstall the per-project cron entry        |
 
 Actions available from the board and task pages mirror the CLI: `tick`,
-`promote`, `retry`, `prune`, `daemon start/stop`, and `upgrade` (runs
-`mas upgrade --yes` in a detached subprocess). The task detail page shows
-plan/subtasks, audit timeline, transitions, cost totals with the per-task
-budget row, and a tabbed log viewer.
+`promote`, `retry`, `delete`, `prune`, `daemon start/stop`, and `upgrade`
+(runs `mas upgrade --yes` in a detached subprocess). The board page has
+a per-task checkbox, a "select all" toggle, and a **Delete selected**
+button for bulk deletion. The task detail page shows a collapsible
+**Task info** section (id, role, column, parent, created, cycle/attempt,
+budget, inputs, constraints, previous failure), plus plan/subtasks, audit
+timeline, transitions, cost totals with the per-task budget row, and a
+tabbed log viewer. Task goals, result summaries/feedback, and
+previous-failure text are rendered as Markdown (headings, lists, fenced
+code, tables).
 
 It is designed for local loopback use and has no auth layer.
 
@@ -426,6 +433,6 @@ See `tests/e2e/scripts/` for examples of role scripts.
 ## Scope of v1
 
 Implemented: `init`, `upgrade`, `validate`, `tick`, `show`, `promote`,
-`retry`, `logs`, `tail`, `audit`, `cost`, `prune`, `cron`, `daemon`, and the
-optional `web` UI. Out of scope (v2): `mas pr`, `mas kill`, `mas stats`,
+`retry`, `delete`, `logs`, `tail`, `audit`, `cost`, `prune`, `cron`,
+`daemon`, and the optional `web` UI. Out of scope (v2): `mas pr`, `mas kill`, `mas stats`,
 `mas doctor`, launchd, parallel child execution, auto-PR/merge.

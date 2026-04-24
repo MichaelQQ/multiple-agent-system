@@ -393,3 +393,57 @@ class TestShowJsonTask:
         assert data == {"error": f"not found: {unknown_id}"}, (
             f"Expected error JSON, got {data!r}"
         )
+
+
+class TestDeleteCommand:
+    def test_delete_removes_task_with_yes_flag(self, tmp_board, monkeypatch):
+        monkeypatch.chdir(tmp_board.parent)
+        task_id = "20260424-delcli-aaaa"
+        tdir = _write_task(tmp_board, "doing", task_id)
+        assert tdir.exists()
+        result = runner.invoke(app, ["delete", task_id, "--yes"])
+        assert result.exit_code == 0, result.output
+        assert not tdir.exists()
+        assert task_id in result.output
+
+    def test_delete_prompts_without_yes_and_aborts(self, tmp_board, monkeypatch):
+        monkeypatch.chdir(tmp_board.parent)
+        task_id = "20260424-delcli-bbbb"
+        tdir = _write_task(tmp_board, "proposed", task_id)
+        result = runner.invoke(app, ["delete", task_id], input="n\n")
+        assert result.exit_code != 0
+        assert tdir.exists()
+
+    def test_delete_unknown_task_exits_nonzero(self, tmp_board, monkeypatch):
+        monkeypatch.chdir(tmp_board.parent)
+        result = runner.invoke(app, ["delete", "20260424-noexist-zzzz", "--yes"])
+        assert result.exit_code != 0
+        assert "not found" in result.output.lower()
+
+    def test_delete_works_across_all_columns(self, tmp_board, monkeypatch):
+        monkeypatch.chdir(tmp_board.parent)
+        for col in ("proposed", "doing", "done", "failed"):
+            task_id = f"20260424-dc{col[0]}-cccc"
+            tdir = _write_task(tmp_board, col, task_id)
+            result = runner.invoke(app, ["delete", task_id, "--yes"])
+            assert result.exit_code == 0, f"{col}: {result.output}"
+            assert not tdir.exists()
+
+    def test_delete_multiple_task_ids(self, tmp_board, monkeypatch):
+        monkeypatch.chdir(tmp_board.parent)
+        ids = ["20260424-multi1-aaaa", "20260424-multi2-bbbb", "20260424-multi3-cccc"]
+        dirs = [_write_task(tmp_board, "proposed", tid) for tid in ids]
+        result = runner.invoke(app, ["delete", *ids, "--yes"])
+        assert result.exit_code == 0, result.output
+        for d in dirs:
+            assert not d.exists()
+        assert "3 deleted" in result.output
+
+    def test_delete_multiple_partial_missing_exits_nonzero(self, tmp_board, monkeypatch):
+        monkeypatch.chdir(tmp_board.parent)
+        real = "20260424-partial-dead"
+        d = _write_task(tmp_board, "doing", real)
+        result = runner.invoke(app, ["delete", real, "20260424-nope-0000", "--yes"])
+        assert result.exit_code != 0
+        assert not d.exists()
+        assert "not found" in result.output.lower()

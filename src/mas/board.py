@@ -97,6 +97,58 @@ def move(src: Path, dst: Path, *, reason: str = "", webhooks=None) -> Path:
     return dst
 
 
+def delete_task(mas_dir: Path, task_id: str, *, project_root: Path | None = None) -> tuple[Column, Path]:
+    """Locate a task in any column, kill its live workers, prune its worktree, and remove it.
+
+    Returns (column, original_dir) for the removed task. Raises FileNotFoundError if
+    the task is not on the board.
+    """
+    import os
+    import signal
+    import time
+
+    located = find_task(mas_dir, task_id)
+    if located is None:
+        raise FileNotFoundError(f"task not found: {task_id}")
+    col, tdir = located
+
+    killed: list[int] = []
+    for pid_file in tdir.glob("**/pids/*.pid"):
+        try:
+            pid = int(pid_file.read_text().strip())
+        except (ValueError, OSError):
+            continue
+        if _pid_alive(pid):
+            try:
+                os.kill(pid, signal.SIGTERM)
+                killed.append(pid)
+            except ProcessLookupError:
+                pass
+    deadline = time.time() + 3.0
+    while killed and time.time() < deadline:
+        killed = [p for p in killed if _pid_alive(p)]
+        if killed:
+            time.sleep(0.1)
+    for pid in killed:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+    if project_root is not None:
+        from . import worktree as _worktree
+        for wt in [tdir / "worktree", *tdir.glob("subtasks/*/worktree")]:
+            if wt.exists():
+                try:
+                    _worktree.prune(project_root, wt, keep_branch=True)
+                except Exception:
+                    log.warning("worktree prune failed", extra={"task_id": task_id, "worktree": str(wt)})
+
+    shutil.rmtree(tdir)
+    log.info("task deleted", extra={"task_id": task_id, "from_column": col})
+    return col, tdir
+
+
 def write_task(dir_: Path, task: Task) -> Path:
     dir_.mkdir(parents=True, exist_ok=True)
     p = dir_ / "task.json"

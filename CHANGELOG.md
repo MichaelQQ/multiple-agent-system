@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Task deletion**: new `mas delete <id> [<id>…] [-y/--yes]` command permanently removes one or more tasks from any column (`proposed/`, `doing/`, `done/`, `failed/`). `board.delete_task()` SIGTERMs any live worker PIDs, escalates to SIGKILL after 3 s, prunes the task's worktree (branch preserved), then removes the task directory. Exits non-zero if any requested ID is not on the board (still deletes the ones that exist). The web UI adds a **Delete** button on the task detail page (`POST /task/{id}/delete`) and per-task checkboxes + a **Delete selected** bulk action on the board (`POST /tasks/delete`, accepts repeated `task_ids` form fields).
+- **Markdown rendering on web UI task page**: task goals, result summaries/feedback, previous-failure text, and subtask goals/summaries now render as Markdown (headings, lists, fenced code with syntax class, tables, nl2br) via a `md` Jinja filter. New collapsible **Task info** card shows id, role, column, parent, created timestamp, cycle/attempt, budget, and pretty-printed `inputs`/`constraints`. Requires the new `markdown>=3.5` dependency in the `web` extra.
+
 - **Web UI parity with CLI**: the web app now exposes the remaining CLI commands and gets a visual refresh.
   - New routes: `GET /events` (cross-task event feed with `task/role/status/event/limit` filters, reuses `read_board_events`), `GET /validate` (runs `validate_environment` and shows a providers/roles summary), `GET /cron` + `POST /cron/install` + `POST /cron/uninstall` (drives `mas.cron`), `POST /upgrade` (spawns detached `mas upgrade --yes`), and `GET /daemon/status` (JSON).
   - Board tasks are sorted by most recent transition (newest first), per column.

@@ -425,6 +425,51 @@ def retry(task_id: str) -> None:
 
 
 @app.command()
+def delete(
+    task_ids: list[str] = typer.Argument(..., help="One or more task IDs to delete"),
+    assume_yes: bool = typer.Option(False, "-y", "--yes", help="Skip confirmation prompt"),
+) -> None:
+    """Permanently remove one or more tasks from any column (proposed/doing/done/failed)."""
+    mas = project_dir()
+    proj = project_root()
+
+    located: list[tuple[str, str]] = []
+    missing: list[str] = []
+    for tid in task_ids:
+        found = board.find_task(mas, tid)
+        if found is None:
+            missing.append(tid)
+        else:
+            col, _ = found
+            located.append((tid, col))
+
+    for tid in missing:
+        typer.echo(f"not found: {tid}")
+    if not located:
+        raise typer.Exit(1)
+
+    if not assume_yes:
+        typer.echo("Will delete:")
+        for tid, col in located:
+            typer.echo(f"  - {tid} (from {col}/)")
+        if not typer.confirm("Proceed? This cannot be undone.", default=False):
+            typer.echo("aborted")
+            raise typer.Exit(1)
+
+    deleted = 0
+    for tid, col in located:
+        try:
+            board.delete_task(mas, tid, project_root=proj)
+            typer.echo(f"deleted {tid} (from {col}/)")
+            deleted += 1
+        except FileNotFoundError:
+            typer.echo(f"not found: {tid}")
+    if missing:
+        raise typer.Exit(1)
+    typer.echo(f"{deleted} deleted")
+
+
+@app.command()
 def prune() -> None:
     """Remove worktree directories from done/ and failed/ tasks."""
     mas = project_dir()
