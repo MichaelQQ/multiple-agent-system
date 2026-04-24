@@ -114,10 +114,10 @@ def delete_task(mas_dir: Path, task_id: str, *, project_root: Path | None = None
 
     killed: list[int] = []
     for pid_file in tdir.glob("**/pids/*.pid"):
-        try:
-            pid = int(pid_file.read_text().strip())
-        except (ValueError, OSError):
+        entry = read_pid_entry(pid_file)
+        if entry is None:
             continue
+        pid, _ = entry
         if _pid_alive(pid):
             try:
                 os.kill(pid, signal.SIGTERM)
@@ -258,10 +258,11 @@ def count_active_pids(mas_dir: Path, provider: str | None = None) -> int:
     for doing in column_dir(mas_dir, "doing").glob("**/pids/*.pid"):
         if provider and f".{provider}." not in doing.name:
             continue
-        try:
-            pid = int(doing.read_text().strip())
-        except (ValueError, OSError):
+        entry = read_pid_entry(doing)
+        if entry is None:
+            doing.unlink(missing_ok=True)
             continue
+        pid, _ = entry
         if _pid_alive(pid):
             n += 1
         else:
@@ -289,11 +290,36 @@ def _pid_alive(pid: int) -> bool:
         return True
 
 
-def write_pid(pid_dir: Path, role: str, provider: str, pid: int) -> Path:
+def write_pid(pid_dir: Path, role: str, provider: str, pid: int, dispatch_time: float | None = None) -> Path:
+    import time as _time
     pid_dir.mkdir(parents=True, exist_ok=True)
     p = pid_dir / f"{role}.{provider}.pid"
-    p.write_text(str(pid))
+    if dispatch_time is None:
+        dispatch_time = _time.time()
+    p.write_text(f"{pid}\n{dispatch_time}\n")
     return p
+
+
+def read_pid_entry(pid_file: Path) -> tuple[int, float | None] | None:
+    """Parse a pidfile. Returns (pid, dispatch_time) or (pid, None) for legacy
+    single-line pidfiles. Returns None if the file is unreadable or malformed."""
+    try:
+        text = pid_file.read_text()
+    except OSError:
+        return None
+    lines = [l for l in text.splitlines() if l.strip()]
+    if not lines:
+        return None
+    try:
+        pid = int(lines[0].strip())
+    except ValueError:
+        return None
+    if len(lines) < 2:
+        return pid, None
+    try:
+        return pid, float(lines[1].strip())
+    except ValueError:
+        return pid, None
 
 
 def clear_pid(pid_dir: Path, role: str, provider: str) -> None:

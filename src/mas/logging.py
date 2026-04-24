@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import logging.handlers
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 
@@ -60,3 +62,32 @@ class TaskLogger(logging.LoggerAdapter):
 
 def get_task_logger(logger: logging.Logger, task_id: str | None = None, component: str | None = None) -> TaskLogger:
     return TaskLogger(logger, {"task_id": task_id, "component": component})
+
+
+def setup_daemon_logging(log_dir: Path, max_bytes: int, backup_count: int) -> logging.handlers.RotatingFileHandler:
+    """Install a RotatingFileHandler at `log_dir/daemon.log` on the `mas` logger.
+
+    Removes any pre-existing RotatingFileHandler on the `mas` logger so repeated
+    calls (e.g. config hot-reload) don't stack handlers.
+    """
+    log_dir = Path(log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "daemon.log"
+
+    root = logging.getLogger("mas")
+    for h in list(root.handlers):
+        if isinstance(h, logging.handlers.RotatingFileHandler):
+            root.removeHandler(h)
+            try:
+                h.close()
+            except Exception:
+                pass
+
+    handler = logging.handlers.RotatingFileHandler(
+        str(log_file), maxBytes=max_bytes, backupCount=backup_count
+    )
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    root.addHandler(handler)
+    if root.level == logging.NOTSET:
+        root.setLevel(logging.INFO)
+    return handler

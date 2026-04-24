@@ -27,7 +27,7 @@ def _stamp() -> str:
 
 
 def _say(msg: str) -> None:
-    print(f"[{_stamp()}] {msg}", flush=True)
+    log.info(msg)
 
 
 class DaemonError(RuntimeError):
@@ -125,11 +125,14 @@ def start(project: Path, interval_seconds: int = 300) -> int:
     os.chdir(str(project))
     os.umask(0o022)
 
-    log_file = open(_log_path(mas), "ab", buffering=0)
-    devnull = open(os.devnull, "rb")
-    os.dup2(devnull.fileno(), sys.stdin.fileno())
-    os.dup2(log_file.fileno(), sys.stdout.fileno())
-    os.dup2(log_file.fileno(), sys.stderr.fileno())
+    from .logging import setup_daemon_logging
+    setup_daemon_logging(mas / "logs", cfg.daemon.log_max_bytes, cfg.daemon.log_backup_count)
+
+    devnull_r = open(os.devnull, "rb")
+    devnull_w = open(os.devnull, "ab")
+    os.dup2(devnull_r.fileno(), sys.stdin.fileno())
+    os.dup2(devnull_w.fileno(), sys.stdout.fileno())
+    os.dup2(devnull_w.fileno(), sys.stderr.fileno())
 
     _pid_path(mas).write_text(f"{os.getpid()}\n")
     _interval_path(mas).write_text(f"{interval_seconds}\n")

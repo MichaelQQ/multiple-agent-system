@@ -1,27 +1,119 @@
+# ============================================================
+# roles.yaml — maps each role to a provider CLI and model.
+#
+# Roles (in flow order):
+#   proposer      — suggests new work items (read-only)
+#   orchestrator  — decomposes a task into plan.json + subtasks
+#   implementer   — writes code in the shared worktree
+#   tester        — runs/authors tests in the shared worktree
+#   evaluator     — returns pass/fail/needs_revision verdict (read-only)
+#
+# Each role accepts these fields (see src/mas/schemas.py::RoleConfig):
+#
+#   provider        required. Must match a key in config.yaml `providers:`.
+#                   Built-in: claude-code, codex, gemini, opencode, ollama,
+#                   mock, script. Agentic providers (claude-code, codex,
+#                   gemini, opencode) get the prompt as a CLI arg and
+#                   write result.json themselves; ollama is text-mode (the
+#                   wrapper collects the JSON response and writes it).
+#
+#   model           optional. Provider-specific identifier. Examples:
+#                     claude-code : claude-opus-4-7, claude-opus-4-6,
+#                                   claude-sonnet-4-6, claude-haiku-4-5,
+#                                   claude-haiku-4-5-20251001
+#                                   (short aliases "opus"/"sonnet"/"haiku"
+#                                   also work — whatever `claude --model`
+#                                   accepts)
+#                     codex       : any value `codex --model` accepts
+#                                   (omit to use the Codex CLI default)
+#                     gemini      : gemini-2.5-pro, gemini-2.5-flash, …
+#                                   (passed via `-m`)
+#                     opencode    : any slug opencode `-m` accepts, e.g.
+#                                   anthropic/claude-opus-4-6,
+#                                   openrouter/qwen/qwen3-coder
+#                     ollama      : local tag, e.g. gemma4:e4b, llama3.1:8b,
+#                                   qwen2.5-coder:7b (defaults to gemma4:e4b
+#                                   if omitted)
+#
+#   timeout_s       int seconds; wall-clock budget per attempt. The tick
+#                   loop SIGTERMs (then SIGKILLs) a worker that exceeds
+#                   this. Default 1800. Typical: proposer/evaluator 300–600,
+#                   orchestrator 600–1200, implementer/tester 1800–3600.
+#
+#   max_retries     int; retry budget on failure. Default 2. Retries land
+#                   in the next tick with `previous_failure` injected into
+#                   the prompt. On exhaustion the parent task moves to
+#                   failed/.
+#
+#   allowed_tools   list[str]; only honored by claude-code and gemini.
+#                     claude-code : forwarded as `--allowedTools` (comma-
+#                                   joined). Tool names: Read, Grep, Glob,
+#                                   Write, Edit, Bash, WebFetch, WebSearch, …
+#                     gemini      : each entry forwarded as
+#                                   `--allowed-tools <name>`
+#                   Ignored by codex, opencode, ollama.
+#
+#   permission_mode str; tool-use permission gate. Per-provider behavior:
+#                     claude-code : passed verbatim to `--permission-mode`.
+#                                   Values: default | acceptEdits |
+#                                   bypassPermissions | plan
+#                     gemini      : mapped → `--approval-mode`
+#                                   (bypassPermissions→yolo,
+#                                    acceptEdits→auto_edit,
+#                                    default→default, plan→plan;
+#                                    defaults to yolo if unset)
+#                     opencode    : bypassPermissions adds
+#                                   `--dangerously-skip-permissions`; also
+#                                   added automatically when the task dir
+#                                   sits outside the worktree cwd
+#                     codex/ollama: ignored
+#
+#   extra_args      list[str]; only honored by the `script` provider (it
+#                   uses extra_args[0] as the script path). For CLI flags
+#                   on the other providers, set `extra_args` on the
+#                   provider entry in config.yaml instead.
+#
+# Concurrency caps live in config.yaml (`providers.<name>.max_concurrent`),
+# not here. Edits to this file are picked up live by `mas daemon` via its
+# config watcher — no restart needed.
+# ============================================================
+
 roles:
   proposer:
+    # Cheap + fast is fine: proposer only reads signals and drafts a goal.
     provider: claude-code
     model: claude-haiku-4-5-20251001
     timeout_s: 600
     max_retries: 2
     allowed_tools: [Read, Grep, Glob]
     permission_mode: bypassPermissions
+
   orchestrator:
+    # Must be strong enough to decompose a task into plan.json + subtasks.
     provider: claude-code
     model: claude-opus-4-6
     timeout_s: 1200
     max_retries: 2
-    allowed_tools: [Read, Grep, Glob, Write]
+    allowed_tools: [Read, Grep, Glob, Write]   # Write needed for plan.json
     permission_mode: default
+
   implementer:
+    # Agentic coding CLI that writes code in the shared worktree.
+    # Alternates when quota/preference differ: claude-code (opus/sonnet),
+    # codex, gemini.
     provider: opencode
     timeout_s: 3600
     max_retries: 2
+
   tester:
+    # Using a different provider from implementer helps catch "author
+    # rubber-stamps own tests". Codex or Gemini are good alternates.
     provider: opencode
     timeout_s: 1800
     max_retries: 2
+
   evaluator:
+    # Read-only verdict pass/fail/needs_revision — cheap to run locally.
     provider: ollama
     model: gemma4:e4b
     timeout_s: 600

@@ -153,6 +153,17 @@ def validate_config(cfg: MasConfig, mas_dir: Path) -> list[ValidationIssue]:
                 message=f"Webhook URL must use http or https scheme, got: {wh.url!r}",
             ))
 
+    if cfg.daemon.log_max_bytes <= 0:
+        issues.append(ValidationIssue(
+            field="daemon.log_max_bytes",
+            message=f"must be a positive integer (bytes), got: {cfg.daemon.log_max_bytes}",
+        ))
+    if cfg.daemon.log_backup_count < 0:
+        issues.append(ValidationIssue(
+            field="daemon.log_backup_count",
+            message=f"must be >= 0, got: {cfg.daemon.log_backup_count}",
+        ))
+
     return issues
 
 

@@ -31,3 +31,7 @@ proposer_signals:
 #   - url: https://hooks.example.com/mas
 #     events: ["done", "failed"]   # column names or "from->to" transitions
 #     timeout_s: 10                # 1..120
+
+# daemon:
+#   log_max_bytes: 10485760        # rotate .mas/logs/daemon.log at 10 MiB
+#   log_backup_count: 5            # keep daemon.log.1 … daemon.log.5

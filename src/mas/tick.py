@@ -80,10 +80,88 @@ def run_tick(*, start: Path | None = None, cfg: "MasConfig" | None = None) -> No
         lock.close()
 
 
+_GRACE_AFTER_SIGTERM_S = 5.0
+
+
 def _reap_workers(env: TickEnv) -> None:
-    """No-op beyond pid bookkeeping: board.count_active_pids already clears dead
-    PID files. Detached workers write result.json themselves before exit."""
+    """Clear dead PIDs and enforce per-role wall-clock timeouts.
+
+    For each live worker PID whose elapsed dispatch time exceeds
+    `roles[<role>].timeout_s`, send SIGTERM, wait a short grace, then SIGKILL
+    if still alive, and synthesize a `failure` result so the normal retry /
+    fail-parent path in `_handle_child_result` takes over.
+
+    Legacy single-line pidfiles (no dispatch timestamp) are skipped for
+    timeout purposes — their age is unknown and we can't safely guess.
+    """
+    import signal
+    import time as _time
+
     board.count_active_pids(env.mas)
+
+    for pid_file in (env.mas / "tasks" / "doing").glob("**/pids/*.pid"):
+        entry = board.read_pid_entry(pid_file)
+        if entry is None:
+            continue
+        pid, dispatch_time = entry
+        if dispatch_time is None:
+            # Legacy pidfile: no timestamp → unknown age, skip.
+            continue
+        if not _pid_alive(pid):
+            continue
+
+        role = pid_file.name.split(".", 1)[0]
+        role_cfg = env.cfg.roles.get(role)
+        if role_cfg is None:
+            continue
+
+        elapsed = _time.time() - dispatch_time
+        if elapsed <= role_cfg.timeout_s:
+            continue
+
+        task_dir = pid_file.parent.parent
+        get_task_logger(log, task_id=task_dir.name, component="reaper").warning(
+            "worker %s exceeded timeout_s=%s (elapsed=%.0fs), sending SIGTERM",
+            role, role_cfg.timeout_s, elapsed,
+        )
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+
+        deadline = _time.time() + _GRACE_AFTER_SIGTERM_S
+        while _time.time() < deadline:
+            if not _pid_alive(pid):
+                break
+            _time.sleep(0.1)
+        if _pid_alive(pid):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+        pid_file.unlink(missing_ok=True)
+        _synthesize_timeout_result(task_dir, role, int(role_cfg.timeout_s))
+
+
+def _synthesize_timeout_result(task_dir: Path, role: str, timeout_s: int) -> None:
+    if (task_dir / "result.json").exists():
+        return
+    attempt = _read_attempt(task_dir / ".attempt")
+    tail = _read_log_tail(task_dir, role, attempt)
+    try:
+        task_id = board.read_task(task_dir).id
+    except Exception:
+        task_id = task_dir.name
+    result = Result(
+        task_id=task_id,
+        status="failure",
+        summary=f"timeout exceeded after {timeout_s}s",
+        feedback=(f"log tail:\n{tail}" if tail else None),
+        duration_s=float(timeout_s),
+    )
+    (task_dir / "result.json").write_text(result.model_dump_json(indent=2))
+    transitions.log_transition(task_dir, "dispatched", "timeout", "worker exceeded role.timeout_s")
 
 
 # --- 2. Advance -------------------------------------------------------------
@@ -303,11 +381,11 @@ def _role_running(pid_dir: Path, role: str) -> bool:
     if not pid_dir.exists():
         return False
     for p in pid_dir.glob(f"{role}.*.pid"):
-        try:
-            pid = int(p.read_text().strip())
-        except (ValueError, OSError):
+        entry = board.read_pid_entry(p)
+        if entry is None:
             p.unlink(missing_ok=True)
             continue
+        pid, _ = entry
         if _pid_alive(pid):
             return True
         p.unlink(missing_ok=True)

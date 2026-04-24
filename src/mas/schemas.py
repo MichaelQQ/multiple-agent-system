@@ -166,6 +166,13 @@ class WebhookConfig(BaseModel):
     timeout_s: int = Field(default=10, ge=1, le=120)
 
 
+class DaemonConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    log_max_bytes: int = 10_485_760
+    log_backup_count: int = 5
+
+
 class MasConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -176,6 +183,7 @@ class MasConfig(BaseModel):
     proposal_similarity_threshold: float = 0.7
     default_cost_budget_usd: float | None = None
     webhooks: list[WebhookConfig] = Field(default_factory=list)
+    daemon: DaemonConfig = Field(default_factory=DaemonConfig)
 
     @field_validator("proposer_signals", mode="before")
     @classmethod
