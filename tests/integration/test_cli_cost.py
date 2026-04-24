@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -162,3 +163,90 @@ class TestCost:
         result = runner.invoke(app, ["cost", task_id])
         assert result.exit_code == 0
         assert "0.001" in result.output or "50" in result.output
+
+    def test_cost_shows_budget_when_set(self, tmp_board, monkeypatch):
+        """mas cost shows a budget column (spent/budget + %) when cost_budget_usd is set."""
+        monkeypatch.chdir(tmp_board.parent)
+
+        task_id = "20260424-cstbdgt-aaaa"
+        sub1_id = "20260424-cstbsub-aaaa"
+
+        parent_dir = tmp_board / "tasks" / "done" / task_id
+        parent_dir.mkdir(parents=True)
+
+        # Write task.json manually: cost_budget_usd not in schema yet, but the
+        # implementation will add it and read it via board.read_task.
+        task_dict = {
+            "id": task_id,
+            "role": "orchestrator",
+            "goal": "budget display test",
+            "inputs": {},
+            "constraints": {},
+            "cost_budget_usd": 1.0,
+            "cycle": 0,
+            "attempt": 1,
+            "created_at": "2026-04-24T00:00:00+00:00",
+        }
+        (parent_dir / "task.json").write_text(json.dumps(task_dict))
+
+        plan = Plan(
+            parent_id=task_id,
+            summary="s",
+            subtasks=[SubtaskSpec(id=sub1_id, role="implementer", goal="impl")],
+        )
+        (parent_dir / "plan.json").write_text(plan.model_dump_json())
+
+        subtasks_dir = parent_dir / "subtasks"
+        subtasks_dir.mkdir()
+        sub1_dir = subtasks_dir / sub1_id
+        sub1_dir.mkdir()
+        (sub1_dir / "result.json").write_text(
+            Result(
+                task_id=sub1_id, status="success", summary="done",
+                tokens_in=100, tokens_out=50, cost_usd=0.05,
+            ).model_dump_json()
+        )
+        (parent_dir / "result.json").write_text(
+            Result(task_id=task_id, status="success", summary="done", cost_usd=0.05).model_dump_json()
+        )
+
+        result = runner.invoke(app, ["cost", task_id])
+        assert result.exit_code == 0, f"exit_code={result.exit_code}: {result.output}"
+        # After implementation: budget column must appear (with spent/budget and % utilization)
+        assert "budget" in result.output.lower(), (
+            "budget column should appear when cost_budget_usd is set on the task"
+        )
+
+    def test_cost_omits_budget_when_not_set(self, tmp_board, monkeypatch):
+        """mas cost omits the budget column when cost_budget_usd is not set."""
+        monkeypatch.chdir(tmp_board.parent)
+
+        task_id = "20260424-nobdgt2-aaaa"
+        sub1_id = "20260424-nobsub2-aaaa"
+
+        parent_dir = tmp_board / "tasks" / "done" / task_id
+        parent_dir.mkdir(parents=True)
+        board.write_task(parent_dir, Task(id=task_id, role="orchestrator", goal="no budget"))
+
+        plan = Plan(
+            parent_id=task_id,
+            summary="s",
+            subtasks=[SubtaskSpec(id=sub1_id, role="implementer", goal="impl")],
+        )
+        (parent_dir / "plan.json").write_text(plan.model_dump_json())
+
+        subtasks_dir = parent_dir / "subtasks"
+        subtasks_dir.mkdir()
+        sub1_dir = subtasks_dir / sub1_id
+        sub1_dir.mkdir()
+        (sub1_dir / "result.json").write_text(
+            Result(task_id=sub1_id, status="success", summary="done", cost_usd=0.05).model_dump_json()
+        )
+        (parent_dir / "result.json").write_text(
+            Result(task_id=task_id, status="success", summary="done", cost_usd=0.05).model_dump_json()
+        )
+
+        result = runner.invoke(app, ["cost", task_id])
+        assert result.exit_code == 0
+        # No budget column when cost_budget_usd is not set
+        assert "budget" not in result.output.lower()

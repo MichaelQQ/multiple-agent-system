@@ -1560,3 +1560,176 @@ def test_finalize_parent_all_none_costs_yields_zero(tmp_path: Path):
     assert result.tokens_in == 0
     assert result.tokens_out == 0
     assert result.cost_usd == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Cost budget guardrail tests
+# ---------------------------------------------------------------------------
+# _advance_one must check accumulated child cost_usd against the effective
+# budget before dispatching the next subtask.  Tests use Task.model_construct()
+# to set cost_budget_usd on the parent without triggering schema validation
+# (the field is added by the implementer).  board.read_task is mocked so that
+# _advance_one receives the constructed task instead of the on-disk copy.
+
+
+def _seed_parent_with_done_and_pending(
+    mas: Path,
+    parent_id: str,
+    done_child_id: str,
+    pending_child_id: str,
+    done_cost_usd: float,
+) -> Path:
+    """Create a doing/ parent with one completed subtask and one pending subtask."""
+    parent = board.task_dir(mas, "doing", parent_id)
+    parent.mkdir(parents=True)
+    board.write_task(parent, Task(id=parent_id, role="orchestrator", goal="g"))
+    (parent / "worktree").mkdir()
+
+    plan = Plan(
+        parent_id=parent_id,
+        summary="s",
+        subtasks=[
+            SubtaskSpec(id=done_child_id, role="implementer", goal="done work"),
+            SubtaskSpec(id=pending_child_id, role="tester", goal="pending work"),
+        ],
+    )
+    (parent / "plan.json").write_text(plan.model_dump_json())
+
+    subtasks_root = parent / "subtasks"
+    subtasks_root.mkdir()
+
+    done_dir = subtasks_root / done_child_id
+    done_dir.mkdir()
+    done_result = Result(
+        task_id=done_child_id, status="success", summary="done", cost_usd=done_cost_usd
+    )
+    (done_dir / "result.json").write_text(done_result.model_dump_json())
+
+    (subtasks_root / pending_child_id).mkdir()
+    return parent
+
+
+def test_cost_budget_no_budget_dispatches_normally(tmp_path: Path):
+    """When no budget is set (cost_budget_usd=None), next subtask is dispatched normally."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent = _seed_parent_with_done_and_pending(
+        mas, "20260424-nobdgt-aaaa", "20260424-nbdone-aaaa", "20260424-nbpend-aaaa", 9999.0
+    )
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg())
+
+    with patch("mas.tick._dispatch_role") as mock_dispatch:
+        _advance_one(env, parent)
+
+    mock_dispatch.assert_called_once()
+
+
+def test_cost_budget_under_budget_dispatches_normally(tmp_path: Path):
+    """When spent < budget, next subtask is dispatched normally."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent = _seed_parent_with_done_and_pending(
+        mas, "20260424-undbdgt-aaaa", "20260424-ubdone-aaaa", "20260424-ubpend-aaaa", 0.5
+    )
+    # Budget 100.0 >> spent 0.5 — dispatch should proceed
+    parent_task = Task.model_construct(
+        id="20260424-undbdgt-aaaa", role="orchestrator", goal="g",
+        cycle=0, attempt=1, parent_id=None, inputs={}, constraints={},
+        previous_failure=None, prior_results=[],
+        cost_budget_usd=100.0,
+    )
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg())
+
+    with patch("mas.board.read_task", return_value=parent_task), \
+         patch("mas.tick._dispatch_role") as mock_dispatch:
+        _advance_one(env, parent)
+
+    mock_dispatch.assert_called_once()
+
+
+def test_cost_budget_exceeded_fails_parent(tmp_path: Path):
+    """When spent >= budget, parent moves to failed/ with a synthesized failure result."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent = _seed_parent_with_done_and_pending(
+        mas, "20260424-exceeded-aaaa", "20260424-exdone-aaaa", "20260424-expend-aaaa", 2.0
+    )
+    # Budget 1.0 < spent 2.0 — must NOT dispatch; must fail the parent
+    parent_task = Task.model_construct(
+        id="20260424-exceeded-aaaa", role="orchestrator", goal="g",
+        cycle=0, attempt=1, parent_id=None, inputs={}, constraints={},
+        previous_failure=None, prior_results=[],
+        cost_budget_usd=1.0,
+    )
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg())
+
+    with patch("mas.board.read_task", return_value=parent_task), \
+         patch("mas.tick._dispatch_role") as mock_dispatch:
+        _advance_one(env, parent)
+
+    # No further subtask must be dispatched
+    mock_dispatch.assert_not_called()
+
+    # Parent must be in failed/
+    failed_dir = mas / "tasks" / "failed" / "20260424-exceeded-aaaa"
+    assert failed_dir.exists(), "parent should be moved to failed/ when budget exceeded"
+
+    # result.json must encode the budget failure with required fields
+    result_path = failed_dir / "result.json"
+    assert result_path.exists(), "result.json must be written on budget exceeded"
+    result = Result.model_validate_json(result_path.read_text())
+    assert result.status == "failure"
+    assert "cost budget exceeded" in result.summary.lower()
+    assert result.handoff is not None, "handoff must contain budget diagnostic fields"
+    assert "spent_usd" in result.handoff
+    assert "budget_usd" in result.handoff
+    assert "last_completed_subtask_id" in result.handoff
+
+    # Transition log must record the specific reason
+    txns = transitions.read_transitions(failed_dir)
+    reasons = [t.reason for t in txns]
+    assert "cost_budget_exceeded" in reasons, (
+        f"expected transition reason 'cost_budget_exceeded', got: {reasons}"
+    )
+
+
+def test_cost_budget_task_override_beats_config_default(tmp_path: Path):
+    """Task-level cost_budget_usd takes priority over MasConfig.default_cost_budget_usd."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent = _seed_parent_with_done_and_pending(
+        mas, "20260424-override-aaaa", "20260424-ovdone-aaaa", "20260424-ovpend-aaaa", 0.8
+    )
+    # Config has a generous default (10.0) that would NOT be exceeded.
+    # Task has a tight budget (0.5) that IS exceeded by spent=0.8.
+    # The task-level budget must take priority.
+    cfg = MasConfig.model_construct(
+        providers={"mock": ProviderConfig(cli="sh", max_concurrent=2, extra_args=[])},
+        roles={
+            "proposer": RoleConfig(provider="mock", max_retries=2),
+            "orchestrator": RoleConfig(provider="mock", max_retries=2),
+            "implementer": RoleConfig(provider="mock", max_retries=2),
+            "tester": RoleConfig(provider="mock", max_retries=2),
+            "evaluator": RoleConfig(provider="mock", max_retries=2),
+        },
+        max_proposed=10,
+        proposal_similarity_threshold=0.7,
+        proposer_signals={},
+        default_cost_budget_usd=10.0,
+    )
+    parent_task = Task.model_construct(
+        id="20260424-override-aaaa", role="orchestrator", goal="g",
+        cycle=0, attempt=1, parent_id=None, inputs={}, constraints={},
+        previous_failure=None, prior_results=[],
+        cost_budget_usd=0.5,
+    )
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=cfg)
+
+    with patch("mas.board.read_task", return_value=parent_task), \
+         patch("mas.tick._dispatch_role") as mock_dispatch:
+        _advance_one(env, parent)
+
+    # Task budget (0.5) must be used instead of config default (10.0)
+    mock_dispatch.assert_not_called()
+    failed_dir = mas / "tasks" / "failed" / "20260424-override-aaaa"
+    assert failed_dir.exists(), "task-level cost_budget_usd must override config default"

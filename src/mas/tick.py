@@ -157,6 +157,26 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
             _finalize_parent(env, parent_dir, parent_task)
         return
 
+    budget_exceeded, spent_usd, budget_usd, last_done_id = _check_cost_budget(
+        env, parent_dir, parent_task, plan, subtasks_root
+    )
+    if budget_exceeded:
+        parent_result = Result(
+            task_id=parent_task.id,
+            status="failure",
+            summary="cost budget exceeded",
+            handoff={
+                "spent_usd": spent_usd,
+                "budget_usd": budget_usd,
+                "last_completed_subtask_id": last_done_id,
+            },
+            duration_s=0.0,
+        )
+        (parent_dir / "result.json").write_text(parent_result.model_dump_json(indent=2))
+        failed_dir = env.mas / "tasks" / "failed" / parent_task.id
+        board.move(parent_dir, failed_dir, reason="cost_budget_exceeded")
+        return
+
     child_dir = subtasks_root / next_child.id
     child_dir.mkdir(parents=True, exist_ok=True)
 
@@ -476,6 +496,28 @@ def _aggregate_child_costs(parent_dir: Path, plan) -> tuple[int, int, float]:
         total_out += r.tokens_out or 0
         total_cost += r.cost_usd or 0.0
     return total_in, total_out, total_cost
+
+
+def _check_cost_budget(
+    env: TickEnv,
+    parent_dir: Path,
+    parent_task: Task,
+    plan: "Plan",
+    subtasks_root: Path,
+) -> tuple[bool, float, "float | None", "str | None"]:
+    budget = getattr(parent_task, "cost_budget_usd", None)
+    if budget is None:
+        budget = getattr(env.cfg, "default_cost_budget_usd", None)
+    if budget is None:
+        return False, 0.0, None, None
+    spent = 0.0
+    last_done_id: str | None = None
+    for spec in plan.subtasks:
+        r = board.read_result(subtasks_root / spec.id) if subtasks_root.exists() else None
+        if r is not None:
+            spent += r.cost_usd or 0.0
+            last_done_id = spec.id
+    return spent >= budget, spent, budget, last_done_id
 
 
 def _finalize_parent(env: TickEnv, parent_dir: Path, parent_task) -> None:

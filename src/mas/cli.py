@@ -628,6 +628,12 @@ def cost(task_id: str) -> None:
     table.add_row("TOTAL", "", str(total_in), str(total_out), f"{total_cost:.6f}", style="bold")
     console.print(table)
 
+    parent_task = board.read_task(tdir)
+    budget = getattr(parent_task, "cost_budget_usd", None)
+    if budget is not None:
+        pct = (total_cost / budget * 100) if budget > 0 else 0.0
+        console.print(f"Budget: {total_cost:.6f} / {budget:.6f} ({pct:.1f}% utilized)")
+
 
 
 cron_app = typer.Typer(no_args_is_help=True, help="Cron schedule for `mas tick`.")
