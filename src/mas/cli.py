@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import difflib
+import json
 import logging
 import shutil
 import subprocess
@@ -203,9 +204,94 @@ def validate(
 @app.command()
 def show(
     task_id: str = typer.Argument(None, help="If given, render the subtask tree for this task"),
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON instead of Rich output"),
 ) -> None:
-    """Print the current board, or a task's subtask tree when an id is given."""
+    """Print the current board, or a task's subtask tree when an id is given.
+
+    With --json, emits a pretty-printed JSON document on stdout instead of the
+    Rich table/tree — suitable for dashboards, CI scripts, or further processing.
+    """
     mas = project_dir()
+    if json_output:
+        if task_id:
+            located = board.find_task(mas, task_id)
+            if located is None:
+                typer.echo(json.dumps({"error": f"not found: {task_id}"}))
+                raise typer.Exit(1)
+            col, tdir = located
+            try:
+                t = board.read_task(tdir)
+            except Exception:
+                typer.echo(json.dumps({"error": f"not found: {task_id}"}))
+                raise typer.Exit(1)
+            result = board.read_result(tdir)
+            result_data = None
+            if result is not None:
+                result_data = {
+                    "status": result.status,
+                    "verdict": result.verdict,
+                    "summary": result.summary,
+                }
+            plan_data = None
+            plan_path = tdir / "plan.json"
+            if plan_path.exists():
+                try:
+                    plan = board.read_plan(tdir)
+                    subtasks = []
+                    for spec in plan.subtasks:
+                        child_dir = tdir / "subtasks" / spec.id
+                        status = _subtask_status(child_dir)
+                        r = board.read_result(child_dir)
+                        subtasks.append({
+                            "id": spec.id,
+                            "role": spec.role,
+                            "goal": spec.goal,
+                            "status": status,
+                            "summary": r.summary if r is not None else "",
+                        })
+                    plan_data = {"subtasks": subtasks}
+                except Exception:
+                    plan_data = None
+            data = {
+                "task_id": task_id,
+                "column": col,
+                "role": t.role,
+                "goal": t.goal,
+                "result": result_data,
+                "plan": plan_data,
+            }
+            typer.echo(json.dumps(data, indent=2))
+            return
+        rows = []
+        for col in board.COLUMNS:
+            for d in board.list_column(mas, col):
+                try:
+                    t = board.read_task(d)
+                    role = t.role
+                    goal = t.goal
+                except Exception:
+                    role = "?"
+                    goal = "?"
+                progress = _subtask_progress(d) if col == "doing" else ""
+                txns = transitions.read_transitions(d)
+                rows.append({
+                    "column": col,
+                    "id": d.name,
+                    "role": role,
+                    "goal": goal,
+                    "progress": progress,
+                    "transitions": [
+                        {
+                            "timestamp": x.timestamp,
+                            "from_state": x.from_state,
+                            "to_state": x.to_state,
+                            "reason": x.reason,
+                        }
+                        for x in txns
+                    ],
+                })
+        typer.echo(json.dumps(rows, indent=2))
+        return
     if task_id:
         _show_task_tree(mas, task_id)
         return

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `mas show --json` / `mas show <id> --json` — new `--json` flag emits a pretty-printed JSON document on stdout instead of the Rich table/tree, suitable for dashboards and CI scripts. Board view returns a list of task objects; task view returns a single object with subtask plan details. Unknown task IDs with `--json` print `{"error": "not found: <id>"}` and exit 1.
+
 - **Config hot-reload for daemon**: The daemon now automatically detects changes to `.mas/config.yaml` and `.mas/roles.yaml` without requiring a restart. Before each tick cycle, it checks the config file modification time and reloads if changed. If the new config is invalid (malformed YAML, missing required fields, unknown provider), the daemon keeps the previous valid configuration and logs a warning.
 
 - `mas cost <task-id>` command prints a per-subtask breakdown of `tokens_in`, `tokens_out`, and `cost_usd`, with a TOTAL row. Exits 1 if the task ID is not found.

@@ -53,7 +53,9 @@ Seed proposer context in `.mas/ideas.md` (one bullet per idea).
 mas validate                  # validate config, providers, and prompts (runs automatically before tick/daemon)
 mas tick                      # run one pass: reap → advance → dispatch
 mas show                      # print the board
+mas show --json               # emit board as pretty-printed JSON (for dashboards/CI)
 mas show <id>                 # render one task's subtask tree
+mas show <id> --json          # emit task details as pretty-printed JSON
 mas promote <id>              # proposed/  → doing/  (human approval gate)
 mas retry   <id>              # failed/    → doing/
 mas logs    <id> [-f]         # print/follow the latest worker log
