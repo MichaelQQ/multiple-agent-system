@@ -158,6 +158,14 @@ class BoardSummary(BaseModel):
     failed: list[str]
 
 
+class WebhookConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    url: str
+    events: list[str] = Field(default_factory=lambda: ["done", "failed"])
+    timeout_s: int = Field(default=10, ge=1, le=120)
+
+
 class MasConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -167,6 +175,7 @@ class MasConfig(BaseModel):
     max_proposed: int = 10
     proposal_similarity_threshold: float = 0.7
     default_cost_budget_usd: float | None = None
+    webhooks: list[WebhookConfig] = Field(default_factory=list)
 
     @field_validator("proposer_signals", mode="before")
     @classmethod

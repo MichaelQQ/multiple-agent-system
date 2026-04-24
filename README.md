@@ -140,6 +140,35 @@ Event types:
 - **`completion`** — a subtask result was reaped (success, failure, or needs_revision). Written to the *parent* task's `audit.jsonl`.
 - **`state_transition`** — the parent task moved between board columns (`proposed → doing`, `doing → done`, etc.).
 
+### Webhooks
+
+Outbound HTTP notifications fired on every board transition. Configure in `.mas/config.yaml`:
+
+```yaml
+webhooks:
+  - url: https://hooks.example.com/mas
+    events: ["done", "failed"]   # column names or "from->to" transitions
+    timeout_s: 10                # 1..120, default 10
+```
+
+`events` accepts column names (e.g. `"done"`, `"failed"`) or explicit transitions (e.g. `"doing->done"`). An empty list means all transitions.
+
+Each delivery is a JSON POST with these fields:
+
+| Field       | Type         | Description                                      |
+|-------------|--------------|--------------------------------------------------|
+| `task_id`   | string       | Parent task ID                                   |
+| `role`      | string\|null | Role that triggered the transition               |
+| `goal`      | string       | Task goal text                                   |
+| `from`      | string       | Source board column                              |
+| `to`        | string       | Destination board column                        |
+| `summary`   | string\|null | Result summary (if available)                    |
+| `status`    | string\|null | Result status (success, failure, needs_revision) |
+| `timestamp` | ISO-8601 UTC | When the transition occurred                     |
+| `task_dir`  | string       | Absolute path to the task directory              |
+
+Delivery is best-effort and non-blocking. Non-2xx responses, timeouts, and connection errors are caught and logged at `WARNING` level; they never block the tick loop.
+
 ### Validation
 
 `mas validate` checks:

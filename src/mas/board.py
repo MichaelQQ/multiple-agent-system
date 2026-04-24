@@ -54,7 +54,7 @@ def list_column(mas_dir: Path, column: Column) -> list[Path]:
     return sorted(p for p in d.iterdir() if p.is_dir())
 
 
-def move(src: Path, dst: Path, *, reason: str = "") -> Path:
+def move(src: Path, dst: Path, *, reason: str = "", webhooks=None) -> Path:
     from . import transitions as _tr
     from . import audit as _audit
     from_state = src.parent.name
@@ -73,6 +73,27 @@ def move(src: Path, dst: Path, *, reason: str = "") -> Path:
         summary=f"{from_state} → {to_state} ({reason})" if reason else f"{from_state} → {to_state}",
         details={"reason": reason},
     )
+    if webhooks is not None:
+        from .notify import fire_webhooks
+        try:
+            _task = read_task(dst)
+            _role = _task.role
+            _goal = _task.goal
+        except Exception:
+            _role = ""
+            _goal = ""
+        _result = read_result(dst)
+        payload = {
+            "task_id": task_id,
+            "role": _role,
+            "goal": _goal,
+            "from": from_state,
+            "to": to_state,
+            "summary": _result.summary if _result else None,
+            "status": _result.status if _result else None,
+            "task_dir": str(dst),
+        }
+        fire_webhooks(webhooks, payload)
     return dst
 
 

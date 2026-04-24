@@ -146,6 +146,13 @@ def validate_config(cfg: MasConfig, mas_dir: Path) -> list[ValidationIssue]:
                 message=f"Prompt template not found",
             ))
 
+    for i, wh in enumerate(cfg.webhooks):
+        if not (wh.url.startswith("http://") or wh.url.startswith("https://")):
+            issues.append(ValidationIssue(
+                field=f"webhooks[{i}].url",
+                message=f"Webhook URL must use http or https scheme, got: {wh.url!r}",
+            ))
+
     return issues
 
 
