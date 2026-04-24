@@ -60,6 +60,7 @@ mas logs    <id> [-f]         # print/follow the latest worker log
 mas tail    <id> [-n 50] [-f] # tail task logs with line control
 mas prune                     # prune leftover worktrees under done/ and failed/
 mas audit   <id>              # display structured audit timeline for a task
+mas events  [--follow] [--json] [filters…]  # aggregate events across all tasks
 mas cost    <id>              # print per-subtask token/cost breakdown
 ```
 
@@ -77,6 +78,42 @@ mas audit <id> --since 2026-04-20T00:00:00Z --until 2026-04-21T00:00:00Z
 
 `mas logs <id>` and `mas tail <id>` show raw subprocess output; `mas audit` shows
 the structured event timeline emitted by the tick loop itself.
+
+#### Cross-task event aggregation with `mas events`
+
+`mas events` aggregates audit events across **all** tasks on the board into a
+single Rich table, sorted by timestamp ascending:
+
+```sh
+mas events                                    # all events from all tasks
+mas events --task 20260423-my-task-ab12       # single task
+mas events --role implementer                 # filter by role
+mas events --status success                   # filter by outcome status
+mas events --event completion                 # filter by event type
+mas events --since 2026-04-20T00:00:00Z --until 2026-04-21T00:00:00Z
+
+# Stream new events as they appear (Ctrl-C to stop)
+mas events --follow
+mas events --follow --interval 5              # poll every 5 s (default: 2)
+
+# Machine-readable newline-delimited JSON
+mas events --json
+mas events --role implementer --status success --json
+```
+
+Flags:
+
+| Flag | Short | Description |
+|---|---|---|
+| `--task` | | Filter to a single task ID |
+| `--role` | | Filter by role name |
+| `--status` | | Filter by outcome status |
+| `--event` | | Filter by event type (`dispatch`, `completion`, `state_transition`) |
+| `--since` | | ISO-8601 lower bound (inclusive) |
+| `--until` | | ISO-8601 upper bound (inclusive) |
+| `--follow` | `-f` | Poll for new events (live tail) |
+| `--interval` | | Polling interval in seconds when `--follow` is active (default: 2) |
+| `--json` | | Emit one JSON object per line instead of a Rich table |
 
 #### `audit.jsonl` format
 

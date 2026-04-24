@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `mas events` command — aggregates `audit.jsonl` events across all tasks on the board (`doing/`, `done/`, `failed/`) into a single Rich table sorted by timestamp ascending. Supports the following flags:
+  - `--task <id>` — restrict to a single task
+  - `--role <name>` — filter by role
+  - `--status <value>` — filter by outcome status
+  - `--event <type>` — filter by event type (`dispatch`, `completion`, `state_transition`)
+  - `--since <ISO>` / `--until <ISO>` — time-range bounds (passed through to `audit.read_events()`)
+  - `--follow` / `-f` — poll for new events and print them as they appear; exits 0 on `KeyboardInterrupt`
+  - `--interval <seconds>` — polling interval in seconds when `--follow` is active (default: 2)
+  - `--json` — emit one newline-delimited JSON object per event instead of a Rich table
+- `src/mas/events.py` module with `read_board_events()` — walks `.mas/tasks/{doing,done,failed}/`, calls `audit.read_events()` per task directory, injects `task_id` when absent, applies task/event post-hoc filters, and returns events sorted by timestamp ascending.
+
 - **Config hot-reload for daemon**: The daemon now automatically detects changes to `.mas/config.yaml` and `.mas/roles.yaml` without requiring a restart. Before each tick cycle, it checks the config file modification time and reloads if changed. If the new config is invalid (malformed YAML, missing required fields, unknown provider), the daemon keeps the previous valid configuration and logs a warning.
 
 - `mas cost <task-id>` command prints a per-subtask breakdown of `tokens_in`, `tokens_out`, and `cost_usd`, with a TOTAL row. Exits 1 if the task ID is not found.
