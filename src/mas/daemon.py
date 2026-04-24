@@ -8,6 +8,11 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Any
+
+from .config import ConfigWatcher as ConfigWatcher
+from .config import load_config as _load_config
+from .schemas import MasConfig
 
 log = logging.getLogger("mas.daemon")
 
@@ -151,14 +156,32 @@ def start(project: Path, interval_seconds: int = 300) -> int:
 
 def _run_loop(project: Path, interval_seconds: int, stop_flag: dict) -> None:
     from .tick import run_tick
+    from .config import load_config as load_cfg, project_dir
 
+    ConfigWatcher = __import__("mas.daemon", fromlist=["ConfigWatcher"]).ConfigWatcher
+
+    mas = project_dir(project)
+    config_path = mas / "config.yaml"
+    watcher = ConfigWatcher(config_path)
+
+    current_config = load_cfg(mas)
     tick_num = 0
     while not stop_flag["stop"]:
         tick_num += 1
         started = time.time()
+
+        if watcher.has_changed():
+            new_config, changes = _check_reload_config(project, current_config)
+            if new_config is not current_config:
+                if changes:
+                    summary = ", ".join(f"{c[0]}: {c[1]}->{c[2]}" for c in changes)
+                    log.info("config reloaded", summary=summary)
+                current_config = new_config
+            watcher.mark_checked()
+
         _say(f"tick #{tick_num} start")
         try:
-            run_tick(start=project)
+            run_tick(start=project, cfg=current_config)
             elapsed = time.time() - started
             _say(f"tick #{tick_num} done in {elapsed:.2f}s")
         except Exception as exc:
@@ -218,3 +241,32 @@ def status(project: Path) -> tuple[int | None, bool]:
     if pid is None:
         return None, False
     return pid, _pid_alive(pid)
+
+
+def _check_reload_config(project: Path, previous_config: "MasConfig") -> tuple["MasConfig", list[tuple[str, str, str]]]:
+    """Check if config.yaml changed, reload if valid, otherwise return previous_config.
+    
+    Returns (new_config, changes) where changes is a list of (field_path, old_value, new_value).
+    """
+    from .config import load_config as load_cfg, project_dir, validate_config, ConfigValidationError
+    from .errors import ConfigValidationError as ConfigValErr
+
+    mas = project_dir(project)
+    try:
+        new_config = load_cfg(mas)
+    except (ConfigValidationError, ConfigValErr) as e:
+        log.warning("config reload skipped: failed to load config: %s", e)
+        return previous_config, []
+
+    issues = validate_config(new_config, mas)
+    if issues:
+        log.warning("config reload skipped: validation failed: %s", "; ".join(f"{i.field}: {i.message}" for i in issues))
+        return previous_config, []
+
+    from .config import config_diff
+    changes = config_diff(previous_config, new_config)
+
+    if changes:
+        log.info("config reloaded: %d changes", len(changes))
+
+    return new_config, changes

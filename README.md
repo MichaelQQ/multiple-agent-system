@@ -179,6 +179,12 @@ The daemon writes its PID to `.mas/daemon.pid`, its configured interval to
 `.mas/daemon.interval`, and logs to `.mas/logs/daemon.log`. Only one daemon
 may run per project; starting a second raises an error.
 
+**Config hot-reload:** The daemon automatically detects changes to `.mas/config.yaml`
+and `.mas/roles.yaml` without requiring a restart. Before each tick cycle, it checks
+the config file modification time and reloads if changed. If the new config is invalid
+(e.g., malformed YAML, missing required fields, unknown provider), the daemon keeps
+the previous valid configuration and logs a warning.
+
 ### System cron
 
 ```sh

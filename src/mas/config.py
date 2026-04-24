@@ -161,3 +161,83 @@ def validate_environment(mas_dir: Path) -> list[ValidationIssue]:
     except Exception as e:
         return [ValidationIssue(field="config", message=str(e))]
     return validate_config(cfg, mas_dir)
+
+
+def _get_config_value(cfg: MasConfig, path: str) -> Any:
+    parts = path.split(".")
+    value = cfg.model_dump()
+    for part in parts:
+        if isinstance(value, dict):
+            value = value.get(part)
+        else:
+            return None
+    return value
+
+
+def config_diff(old_cfg: MasConfig, new_cfg: MasConfig) -> list[tuple[str, str, str]]:
+    """Compare two MasConfig instances and return changes as (field_path, old_value, new_value)."""
+    changes: list[tuple[str, str, str]] = []
+
+    old_providers = old_cfg.model_dump().get("providers", {})
+    new_providers = new_cfg.model_dump().get("providers", {})
+    all_provider_names = set(old_providers.keys()) | set(new_providers.keys())
+    for name in all_provider_names:
+        if name not in old_providers:
+            changes.append((f"providers.{name}", "<missing>", "<added>"))
+        elif name not in new_providers:
+            changes.append((f"providers.{name}", "<exists>", "<missing>"))
+        else:
+            old_p = old_providers[name]
+            new_p = new_providers[name]
+            for field in {"cli", "max_concurrent", "extra_args"}:
+                old_val = old_p.get(field) if isinstance(old_p, dict) else getattr(old_p, field, None)
+                new_val = new_p.get(field) if isinstance(new_p, dict) else getattr(new_p, field, None)
+                if old_val != new_val:
+                    changes.append((f"providers.{name}.{field}", str(old_val), str(new_val)))
+
+    old_roles = old_cfg.model_dump().get("roles", {})
+    new_roles = new_cfg.model_dump().get("roles", {})
+    all_role_names = set(old_roles.keys()) | set(new_roles.keys())
+    for name in all_role_names:
+        if name not in old_roles:
+            changes.append((f"roles.{name}", "<missing>", "<added>"))
+        elif name not in new_roles:
+            changes.append((f"roles.{name}", "<exists>", "<missing>"))
+        else:
+            old_r = old_roles[name]
+            new_r = new_roles[name]
+            for field in {"provider", "model", "timeout_s", "max_retries", "allowed_tools", "permission_mode", "extra_args"}:
+                old_val = old_r.get(field) if isinstance(old_r, dict) else getattr(old_r, field, None)
+                new_val = new_r.get(field) if isinstance(new_r, dict) else getattr(new_r, field, None)
+                if old_val != new_val:
+                    changes.append((f"roles.{name}.{field}", str(old_val), str(new_val)))
+
+    for field in {"max_proposed", "proposal_similarity_threshold"}:
+        old_val = getattr(old_cfg, field, None)
+        new_val = getattr(new_cfg, field, None)
+        if old_val != new_val:
+            changes.append((field, str(old_val), str(new_val)))
+
+    return changes
+
+
+class ConfigWatcher:
+    """Tracks config.yaml mtime and reports whether the file changed since last check."""
+
+    def __init__(self, config_path: Path):
+        self.config_path = Path(config_path)
+        self._last_mtime: float | None = None
+        if self.config_path.exists():
+            self._last_mtime = self.config_path.stat().st_mtime
+
+    def has_changed(self) -> bool:
+        if not self.config_path.exists():
+            return False
+        current_mtime = self.config_path.stat().st_mtime
+        if self._last_mtime is None:
+            return False
+        return current_mtime != self._last_mtime
+
+    def mark_checked(self) -> None:
+        if self.config_path.exists():
+            self._last_mtime = self.config_path.stat().st_mtime
