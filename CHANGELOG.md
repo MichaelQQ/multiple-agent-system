@@ -15,6 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cost budget short-circuit in tick**: Before dispatching the next subtask, `_advance_one()` sums `cost_usd` from all completed child `result.json` files. If the running total meets or exceeds the effective budget (`task.cost_budget_usd` takes precedence over `config.default_cost_budget_usd`), the tick writes a failure `result.json` with `summary="cost budget exceeded"` and a `handoff` containing `spent_usd`, `budget_usd`, and `last_completed_subtask_id`, then moves the parent task to `failed/` with transition reason `cost_budget_exceeded` without dispatching further work.
 - **`mas cost` budget column**: When `cost_budget_usd` is set on the parent task, `mas cost <task-id>` now prints a `Budget:` line showing `spent / budget (% utilized)` after the per-subtask table.
 
+- `mas events` command — aggregates `audit.jsonl` events across all tasks on the board (`doing/`, `done/`, `failed/`) into a single Rich table sorted by timestamp ascending. Supports the following flags:
+  - `--task <id>` — restrict to a single task
+  - `--role <name>` — filter by role
+  - `--status <value>` — filter by outcome status
+  - `--event <type>` — filter by event type (`dispatch`, `completion`, `state_transition`)
+  - `--since <ISO>` / `--until <ISO>` — time-range bounds (passed through to `audit.read_events()`)
+  - `--follow` / `-f` — poll for new events and print them as they appear; exits 0 on `KeyboardInterrupt`
+  - `--interval <seconds>` — polling interval in seconds when `--follow` is active (default: 2)
+  - `--json` — emit one newline-delimited JSON object per event instead of a Rich table
+- `src/mas/events.py` module with `read_board_events()` — walks `.mas/tasks/{doing,done,failed}/`, calls `audit.read_events()` per task directory, injects `task_id` when absent, applies task/event post-hoc filters, and returns events sorted by timestamp ascending.
+
 - **Config hot-reload for daemon**: The daemon now automatically detects changes to `.mas/config.yaml` and `.mas/roles.yaml` without requiring a restart. Before each tick cycle, it checks the config file modification time and reloads if changed. If the new config is invalid (malformed YAML, missing required fields, unknown provider), the daemon keeps the previous valid configuration and logs a warning.
 
 - `mas cost <task-id>` command prints a per-subtask breakdown of `tokens_in`, `tokens_out`, and `cost_usd`, with a TOTAL row. Exits 1 if the task ID is not found.

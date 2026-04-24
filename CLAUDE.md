@@ -37,7 +37,7 @@ Each adapter's `build_command()` returns the CLI invocation; `dispatch()` (inher
 
 **Worktree** (`src/mas/worktree.py`): Git worktree per parent task on branch `mas/{task_id}`. Shared across all subtasks of that parent. Pruned on completion (branch preserved).
 
-**CLI** (`src/mas/cli.py`): Typer app. Commands: `init`, `tick`, `show`, `promote`, `retry`, `prune`, `logs`, `tail`, `upgrade`, `cron {install,uninstall,status}`, `daemon {start,stop,status}`.
+**CLI** (`src/mas/cli.py`): Typer app. Commands: `init`, `tick`, `show`, `promote`, `retry`, `prune`, `logs`, `tail`, `upgrade`, `events`, `cron {install,uninstall,status}`, `daemon {start,stop,status}`.
 
 **ConfigWatcher** (`src/mas/config.py`): Tracks `config.yaml` and `roles.yaml` modification times. Provides `has_changed()` and `mark_checked()` methods. Used by the daemon to implement config hot-reload with fallback on invalid config.
 

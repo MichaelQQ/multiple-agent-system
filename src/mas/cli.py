@@ -636,6 +636,77 @@ def cost(task_id: str) -> None:
 
 
 
+@app.command()
+def events(
+    task: str | None = typer.Option(None, "--task", help="Filter by task id"),
+    role: str | None = typer.Option(None, "--role", help="Filter by role"),
+    status: str | None = typer.Option(None, "--status", help="Filter by status"),
+    event: str | None = typer.Option(None, "--event", help="Filter by event type"),
+    since: str | None = typer.Option(None, "--since", help="Show events at or after this ISO timestamp"),
+    until: str | None = typer.Option(None, "--until", help="Show events at or before this ISO timestamp"),
+    json_output: bool = typer.Option(False, "--json", is_flag=True, help="Emit newline-delimited JSON"),
+    follow: bool = typer.Option(False, "--follow", "-f", is_flag=True, help="Follow mode: stream new events"),
+    interval: float = typer.Option(2.0, "--interval", help="Poll interval in seconds for --follow"),
+) -> None:
+    """Stream board-wide audit events across all tasks."""
+    import json as _json
+    import time
+
+    from .events import read_board_events
+
+    mas = project_dir()
+
+    def _fetch() -> list:
+        return read_board_events(
+            mas, task=task, role=role, status=status, event=event, since=since, until=until
+        )
+
+    def _emit(evts: list) -> None:
+        if json_output:
+            for e in evts:
+                typer.echo(_json.dumps(e))
+        else:
+            for e in evts:
+                typer.echo(
+                    f"{(e.get('timestamp') or '')[:19]}  "
+                    f"{e.get('task_id') or '':30}  "
+                    f"{e.get('event') or '':20}  "
+                    f"{e.get('role') or '':15}  "
+                    f"{e.get('status') or '':10}  "
+                    f"{e.get('summary') or ''}"
+                )
+
+    if follow:
+        seen = 0
+        try:
+            while True:
+                all_evts = _fetch()
+                new_evts = all_evts[seen:]
+                seen = len(all_evts)
+                _emit(new_evts)
+                time.sleep(interval)
+        except KeyboardInterrupt:
+            pass
+        return
+
+    all_evts = _fetch()
+    if json_output:
+        for e in all_evts:
+            typer.echo(_json.dumps(e))
+    else:
+        table = Table("timestamp", "task_id", "event", "role", "status", "summary")
+        for e in all_evts:
+            table.add_row(
+                (e.get("timestamp") or "")[:19],
+                e.get("task_id") or "",
+                e.get("event") or "",
+                e.get("role") or "",
+                e.get("status") or "",
+                e.get("summary") or "",
+            )
+        console.print(table)
+
+
 cron_app = typer.Typer(no_args_is_help=True, help="Cron schedule for `mas tick`.")
 app.add_typer(cron_app, name="cron")
 
