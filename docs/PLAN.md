@@ -1,7 +1,5 @@
 # Multi-Agents Orchestration System (`mas`) — Plan
 
-> **Step 0 on approval:** copy this plan file to `/Users/_vpon/Documents/multi-agents/docs/PLAN.md` so it's tracked in the repo alongside the code.
-
 ## Context
 
 Greenfield project at `/Users/_vpon/Documents/multi-agents`. Goal: build a personal, provider-agnostic orchestrator (`mas`) that coordinates multiple coding-capable CLI agents (Claude Code, Codex, Gemini CLI, Ollama) as a role-based team. A job board in `.mas/tasks/` holds tasks across columns (`proposed/`, `doing/`, `done/`, `failed/`). A **proposer** agent suggests work, the user moves approved cards `proposed → doing`, an **orchestrator** picks them up, decomposes into visible **child tasks**, and drives them through **implementer → tester → evaluator** inside a per-task git worktree. Multi-provider lets the user route cheap text-only roles (evaluation, proposal) to Ollama while coding roles run on Claude Code / Codex / Gemini.
@@ -32,7 +30,7 @@ The user wants strict structured data between agents (JSON files, no prose hand-
 | 18 | Eval verdicts | `pass` / `fail` / `needs_revision`. `pass` → parent to `done/`. `fail` → retry per failure policy. `needs_revision` → orchestrator appends a new implementer+tester+evaluator child triplet with evaluator feedback, bounded by `max_revision_cycles` (default 2). |
 | 19 | Completion | Worktree pruned (branch preserved). Task moves to `tasks/done/{id}/`. Human runs `gh pr create` or (v2) `mas pr <id>`. No auto-merge. |
 | 20 | Scheduling | `mas cron install` writes a crontab entry (`*/5 * * * * cd <project> && mas tick >> .mas/logs/tick.log 2>&1`). `uninstall`, `status` siblings. macOS may use launchd — v2. |
-| 21 | CLI surface (v1) | `mas init`, `mas tick`, `mas show`, `mas promote <id>`, `mas retry <id>`, `mas logs <id> [-f]`, `mas cron {install,uninstall,status}`. v2 shipped: `stats`. v2 remaining: `pr`, `kill`, `prune`, `doctor`. |
+| 21 | CLI surface (v1) | `mas init`, `mas tick`, `mas show`, `mas promote <id>`, `mas retry <id>`, `mas logs <id> [-f]`, `mas cron {install,uninstall,status}`. v2 shipped: `validate`, `delete`, `tail`, `prune`, `audit`, `events`, `cost`, `stats`, `upgrade`, `daemon {start,stop,status}`, `web`. v2 remaining: `pr`, `kill`, `doctor`. |
 
 ## Shipping defaults (pushable-back)
 
@@ -146,12 +144,29 @@ Each dispatch: render role prompt → write task-dir `task.json` → `Popen([cli
 
 ## Shipped in v2
 
+- `mas validate` — config + provider + prompt-template validation. Runs automatically before `mas tick` and `mas daemon start`.
+- `mas delete <id>…` — permanently remove tasks from any column; SIGTERMs live workers, prunes the worktree (branch preserved).
+- `mas tail <id>` — line-controlled log tail (`-n`, `-f`).
+- `mas prune` — clean up leftover worktrees under `done/` and `failed/` (branch preserved).
+- `mas audit <id>` — Rich timeline of structured events from `{task_dir}/audit.jsonl` (`dispatch`, `completion`, `state_transition`).
+- `mas events` — board-wide audit feed across `doing/`, `done/`, `failed/`. Flags: `--task`, `--role`, `--status`, `--event`, `--since`, `--until`, `--follow`/`-f`, `--interval`, `--json`.
+- `mas cost <id>` — per-subtask token / cost breakdown plus `Budget:` row when `cost_budget_usd` is set on the task or `default_cost_budget_usd` in config.
 - `mas stats` — aggregate board/role/provider/token statistics. Flags: `--since <duration>` (h/d/w), `--json`.
+- `mas show --json` / `mas show <id> --json` — machine-readable board / task tree.
+- `mas upgrade` — refresh `.mas/` templates; per-file unified diff, confirm prompt (`-y` to skip), optional daemon restart using interval persisted in `.mas/daemon.interval`.
+- `mas daemon {start,stop,status}` — detached per-project tick loop with rotating logs (`daemon.log_max_bytes`, `daemon.log_backup_count`) and config hot-reload (`config.yaml` + `roles.yaml` mtime check before each tick; falls back on the previous valid config if the new one fails to validate).
+- `mas web` — local FastAPI/Jinja UI (loopback only, no auth). Pages: Board, Events, Validate, Cron. Mirrors CLI actions (`tick`, `promote`, `retry`, `delete`, single + bulk; `prune`, `daemon start/stop`, `upgrade`). Markdown rendering for goals, summaries, feedback, and previous-failure text.
+- **Webhooks** — outbound HTTP POST on every `board.move()`. Configured under `webhooks:` in `config.yaml` with `url`, `events` (column names or `from->to` strings), and `timeout_s`. Best-effort and non-blocking.
+- **Per-task cost budgets** — `Task.cost_budget_usd` (per-task) and `MasConfig.default_cost_budget_usd` (project default). Tick short-circuits before dispatching the next subtask once spent ≥ budget; parent moves to `failed/` with reason `cost_budget_exceeded`.
+- **Per-role wall-clock timeout** — PID files include a dispatch timestamp; reaper SIGTERM/SIGKILLs workers exceeding `roles[<role>].timeout_s`, synthesizes a `failure` result with `summary="timeout exceeded after Ns"` so the normal retry path runs unchanged.
+- **Audit logging** — every dispatch, completion, and state transition is appended to `{task_dir}/audit.jsonl` (timestamp, event, role, provider, task_id, subtask_id, status, duration_s, summary, details).
+- **Cost tracking** — adapters populate `tokens_in`, `tokens_out`, `cost_usd` on `result.json` where reported; `tick._finalize_parent` aggregates child totals into the parent `result.json`. Rate table in `src/mas/pricing.py`.
+- **Strict schema validation** — all pydantic models use `extra="forbid"`; `Task.id` is regex-validated; `Result.duration_s` must be ≥ 0; custom errors (`PlanParseError`, `TaskReadError`, `ResultReadError`) carry file path + content snippet + root cause.
 
 ## Out of scope for v1 (remaining)
 
-- `mas pr`, `mas kill`, `mas prune`, `mas doctor`.
-- launchd plist support (crontab only).
+- `mas pr`, `mas kill`, `mas doctor`.
+- launchd plist support (crontab only; `mas daemon` covers the no-system-cron case).
 - Parallel child execution / merge strategy.
 - Auto-PR / auto-merge.
 - External issue tracker integration.

@@ -421,7 +421,7 @@ The E2E suites (`tests/e2e/test_lifecycle.py` and
 proposed → doing → done. They validate task transitions, schema compliance,
 revision cycles, worktree lifecycle, and script-provider subprocess behavior.
 
-See [TESTING_STRATEGY.md](TESTING_STRATEGY.md) for the full testing approach.
+See [docs/testing-strategy.md](docs/testing-strategy.md) for the full testing approach.
 
 #### Script Adapter
 

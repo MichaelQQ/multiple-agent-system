@@ -28,7 +28,10 @@ This document defines a three-layer testing strategy: **Unit Tests**, **Integrat
 
 ### Test Location
 
-Tests go in `tests/unit/`.
+Most current unit tests live at the top level (`tests/test_*.py`) — e.g.
+`tests/test_ids.py`, `tests/test_schemas.py`, `tests/test_board.py`,
+`tests/test_config.py`, `tests/test_worktree.py`. Adapter-specific suites live
+under `tests/adapters/`. New unit tests can be added in either place.
 
 ---
 
@@ -54,7 +57,10 @@ Tests go in `tests/unit/`.
 
 ### Test Location
 
-Tests go in `tests/integration/`.
+Cross-module and CLI scenarios live in `tests/integration/`. Some older
+cross-module suites also remain at the top level
+(`tests/test_tick.py`, `tests/test_cli.py`, `tests/test_orphan.py`,
+`tests/test_retry_marker.py`).
 
 ---
 
@@ -85,12 +91,15 @@ Tests go in `tests/integration/`.
 
 ### Test Markers
 
-- Mark tests with `@pytest.mark.e2e`
-- Skip by default; run with `pytest -m e2e`
+E2E tests are not currently gated behind a marker — they live in `tests/e2e/`
+and run as part of the default `pytest` invocation. Run only the E2E layer with
+`.venv/bin/pytest tests/e2e/ -q`.
 
 ### Test Location
 
-Tests go in `tests/e2e/`.
+Tests go in `tests/e2e/` (currently `test_lifecycle.py` and
+`test_lifecycle_script.py`, with shared fixtures in `tests/e2e/conftest.py`
+and helper scripts under `tests/e2e/scripts/`).
 
 ---
 
@@ -148,30 +157,30 @@ def test_cli_command():
 
 ```
 tests/
-├── conftest.py           # Shared fixtures
-├── unit/                 # Unit tests
-│   ├── __init__.py
-│   ├── test_ids.py
-│   ├── test_schemas.py
-│   ├── test_board.py
-│   ├── test_roles.py
-│   ├── test_worktree.py
-│   └── test_adapters.py
-├── integration/          # Integration tests
-│   ├── __init__.py
-│   ├── test_task_lifecycle.py
-│   ├── test_dispatch.py
-│   ├── test_prompt_rendering.py
-│   └── test_worktree_lifecycle.py
-└── e2e/                 # End-to-end tests
-    ├── __init__.py
-    ├── test_happy_path.py
-    ├── test_retry.py
-    ├── test_max_retries.py
-    └── test_orphan_detection.py
+├── conftest.py            # shared fixtures
+├── test_*.py              # unit + some cross-module integration tests
+├── adapters/              # provider adapter suites
+│   ├── test_claude_code.py
+│   ├── test_gemini_cli.py
+│   ├── test_health_check.py
+│   ├── test_ollama.py
+│   ├── test_opencode.py
+│   └── test_script_adapter.py
+├── integration/           # CLI + multi-module scenarios
+│   ├── test_cli.py
+│   └── test_cli_cost.py
+└── e2e/                   # full lifecycle suites
+    ├── conftest.py
+    ├── scripts/           # role scripts for the script adapter
+    ├── test_lifecycle.py
+    └── test_lifecycle_script.py
 ```
 
-> **Note**: Existing tests at `tests/test_*.py` remain in place per the constraint. New tests go into the subdirectories.
+> **Note:** The older "Unit / Integration / E2E" subdirectory split was never
+> migrated to. The current convention is the layout above; place new tests
+> where they fit best (small isolated logic → top-level `tests/test_*.py`;
+> provider-specific → `tests/adapters/`; CLI / cross-module → `tests/integration/`;
+> full lifecycle → `tests/e2e/`).
 
 ---
 
@@ -267,18 +276,9 @@ def git_repo(tmp_path):
 ## 8. Running Tests
 
 ```sh
-# Run unit and integration tests (default)
-pytest tests/
-
-# Run only unit tests
-pytest tests/unit/
-
-# Run only integration tests
-pytest tests/integration/
-
-# Run E2E tests (skipped by default)
-pytest -m e2e
-
-# Run all tests including E2E
-pytest -m ""
+.venv/bin/pytest -q                                          # all tests
+.venv/bin/pytest tests/adapters/ tests/integration/ -q       # adapter + CLI suites
+.venv/bin/pytest tests/e2e/ -q                               # E2E only
+.venv/bin/pytest tests/test_tick.py -q                       # single file
+.venv/bin/pytest tests/test_tick.py::test_name -q            # single test
 ```
