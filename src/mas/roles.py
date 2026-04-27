@@ -127,6 +127,34 @@ def _list_goals(mas_root: Path, column: str, *, limit: int | None = None) -> lis
     return goals
 
 
+def _list_goals_with_meta(
+    mas_root: Path, column: str, *, limit: int | None = None
+) -> list[tuple[str, str, str]]:
+    """Return (column, task_id, goal) tuples from a board column."""
+    col_dir = mas_root / "tasks" / column
+    entries = list(col_dir.glob("*/task.json"))
+    if limit is not None:
+        entries.sort(key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
+    else:
+        entries.sort()
+
+    result: list[tuple[str, str, str]] = []
+    for task_json in entries:
+        if limit is not None and len(result) >= limit:
+            break
+        try:
+            data = json.loads(task_json.read_text())
+            known = Task.model_fields.keys()
+            data = {k: v for k, v in data.items() if k in known}
+            task = Task.model_validate(data)
+            if task.role == "proposer":
+                continue
+            result.append((column, task_json.parent.name, task.goal or task_json.parent.name))
+        except Exception:
+            result.append((column, task_json.parent.name, task_json.parent.name))
+    return result
+
+
 def _list_proposed_tasks(mas_root: Path) -> list[str]:
     """Back-compat shim; prefer _list_goals."""
     return _list_goals(mas_root, "proposed")

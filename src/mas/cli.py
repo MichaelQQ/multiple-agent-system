@@ -888,5 +888,47 @@ def web(
     )
 
 
+proposals_app = typer.Typer(no_args_is_help=True, help="Proposal management commands.")
+app.add_typer(proposals_app, name="proposals")
+
+
+@proposals_app.command("rejected")
+def proposals_rejected(
+    since: str | None = typer.Option(None, "--since", help="Filter by time window (e.g. 1h, 2d, 1w)"),
+    limit: int = typer.Option(50, "--limit", help="Maximum number of records (newest-first)"),
+    json_output: bool = typer.Option(False, "--json", is_flag=True, help="Emit newline-delimited JSON"),
+) -> None:
+    """Show rejected (duplicate) proposals."""
+    import json as _json
+    from .proposals import read_rejected_proposals
+    from .stats import parse_since
+
+    if since is not None:
+        try:
+            parse_since(since)
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc), param_hint="'--since'")
+
+    mas = project_dir()
+    rejected_path = mas / "proposals" / "rejected.jsonl"
+    records = read_rejected_proposals(rejected_path, since=since, limit=limit)
+
+    if json_output:
+        for rec in records:
+            typer.echo(_json.dumps(rec))
+        return
+
+    table = Table("timestamp", "summary", "score", "matched_task_id", "matched_column")
+    for rec in records:
+        table.add_row(
+            rec.get("timestamp", ""),
+            rec.get("summary", ""),
+            f"{rec.get('similarity_score', 0.0):.3f}",
+            rec.get("matched_task_id", ""),
+            rec.get("matched_column", ""),
+        )
+    console.print(table)
+
+
 if __name__ == "__main__":
     app()

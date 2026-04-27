@@ -15,7 +15,8 @@ from .adapters import AdapterUnavailableError, get_adapter
 from .config import load_config, project_root, project_dir, validate_config, ConfigWatcher
 from .ids import task_id as new_task_id
 from .logging import get_task_logger
-from .roles import _list_goals, find_similar_goal, gather_proposer_signals, parse_plan, render_prompt
+from .proposals import RejectedProposal, write_rejected_proposal
+from .roles import _list_goals, _list_goals_with_meta, find_similar_goal, gather_proposer_signals, parse_plan, render_prompt
 from .schemas import BaseModel, ConfigDict, MasConfig, Plan, ProposalHandoff, Result, Role, Task
 
 log = logging.getLogger("mas.tick")
@@ -656,15 +657,36 @@ def _materialize_proposal(env: TickEnv, result: Result) -> None:
     if len(board.list_column(env.mas, "proposed")) >= env.cfg.max_proposed:
         return
 
-    existing_goals = (
-        _list_goals(env.mas, "proposed")
-        + _list_goals(env.mas, "doing")
-        + _list_goals(env.mas, "done", limit=50)
-        + _list_goals(env.mas, "failed", limit=20)
+    goals_with_meta = (
+        _list_goals_with_meta(env.mas, "proposed")
+        + _list_goals_with_meta(env.mas, "doing")
+        + _list_goals_with_meta(env.mas, "done", limit=50)
+        + _list_goals_with_meta(env.mas, "failed", limit=20)
     )
+    existing_goals = [g for _, _, g in goals_with_meta]
     hit = find_similar_goal(goal, existing_goals, threshold=env.cfg.proposal_similarity_threshold)
     if hit is not None:
-        tlog.info("dropping duplicate proposal (jaccard=%.2f vs %r): %r", hit[1], hit[0], goal)
+        matched_goal, score = hit
+        matched_column = "proposed"
+        matched_task_id = ""
+        for col, tid, g in goals_with_meta:
+            if g == matched_goal:
+                matched_column = col
+                matched_task_id = tid
+                break
+        tlog.info("dropping duplicate proposal (jaccard=%.2f vs %r): %r", score, matched_goal, goal)
+        from datetime import datetime, timezone as _tz
+        truncated_goal = goal if len(goal) <= 500 else goal[:497] + "..."
+        record = RejectedProposal(
+            timestamp=datetime.now(_tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            summary=result.summary or "",
+            goal=truncated_goal,
+            similarity_score=score,
+            matched_task_id=matched_task_id,
+            matched_column=matched_column,
+            threshold=env.cfg.proposal_similarity_threshold,
+        )
+        write_rejected_proposal(env.mas, record)
         return
 
     inputs: dict = {}

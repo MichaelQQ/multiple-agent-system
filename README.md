@@ -66,6 +66,7 @@ mas audit   <id>              # display structured audit timeline for a task
 mas events  [--follow] [--json] [filters…]  # aggregate events across all tasks
 mas cost    <id>              # print per-subtask token/cost breakdown
 mas stats                     # print aggregate board/role/provider/token statistics
+mas proposals rejected [--since 7d] [--limit 50] [--json]  # list rejected duplicate proposals
 ```
 
 ### Observability
@@ -248,6 +249,26 @@ mas stats --json              # emit raw JSON instead of a Rich table
 | Environment errors | tasks with `status=environment_error` or env-retry markers |
 
 With `--json` the output is a single JSON object — useful for piping into `jq` or dashboards.
+
+## Proposals
+
+### Rejected proposals
+
+When the proposer's similarity check drops a duplicate task, the tick loop appends a record to `.mas/proposals/rejected.jsonl`. The file is written lazily — it is created on the first rejection and does not require `mas init` or `mas upgrade`.
+
+```sh
+mas proposals rejected                      # newest-first table (default limit 50)
+mas proposals rejected --since 7d           # last 7 days (also accepts: h, d, w suffixes)
+mas proposals rejected --limit 20 --json    # NDJSON output
+```
+
+| Flag | Description |
+|---|---|
+| `--since <Nh\|Nd\|Nw>` | Filter records newer than the given duration |
+| `--limit N` | Cap results (default 50) |
+| `--json` | Emit one JSON object per line instead of a Rich table |
+
+Exits 0 when the log is missing or empty. Malformed lines are skipped with a `WARNING` and do not crash the command.
 
 ## Upgrading templates
 
