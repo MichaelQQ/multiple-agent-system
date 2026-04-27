@@ -198,6 +198,7 @@ def validate(
 
     for issue in issues:
         typer.echo(f"ERROR: {issue.field}: {issue.message}")
+
     raise typer.Exit(1)
 
 
@@ -840,12 +841,129 @@ def cron_uninstall() -> None:
 def cron_status() -> None:
     typer.echo(cron.status(project_root()))
 
-
 daemon_app = typer.Typer(
     no_args_is_help=True,
     help="Run `mas tick` on an interval via a detached daemon (no system cron).",
 )
 app.add_typer(daemon_app, name="daemon")
+
+
+_SECRET_WORDS = frozenset({"key", "token", "secret", "password"})
+
+
+def _is_sensitive_key(key: str) -> bool:
+    kl = key.lower()
+    return any(w in kl for w in _SECRET_WORDS)
+
+
+def _mask_url_query(url: str) -> str:
+    from urllib.parse import urlparse, urlunparse
+    parsed = urlparse(url)
+    if not parsed.query:
+        return url
+    parts = []
+    for segment in parsed.query.split("&"):
+        if "=" in segment:
+            k, _ = segment.split("=", 1)
+            parts.append(f"{k}=***" if _is_sensitive_key(k) else segment)
+        else:
+            parts.append(segment)
+    return urlunparse(parsed._replace(query="&".join(parts)))
+
+
+def _mask_secrets(obj, parent_key=""):
+    if isinstance(obj, dict):
+        return {k: _mask_secrets(v, k) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_mask_secrets(item, parent_key) for item in obj]
+    if isinstance(obj, str):
+        if _is_sensitive_key(parent_key):
+            return "***"
+        if "?" in obj and (obj.startswith("http://") or obj.startswith("https://")):
+            return _mask_url_query(obj)
+    return obj
+
+
+config_app = typer.Typer(
+    no_args_is_help=True,
+    help="Manage and inspect mas configuration.",
+)
+app.add_typer(config_app, name="config")
+
+
+@config_app.command("show")
+def config_show(
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON instead of YAML"),
+    yaml_output: bool = typer.Option(False, "--yaml", help="Emit YAML (default)"),
+    field: str | None = typer.Option(None, "--field", help="Print a single field value"),
+    unsafe_show_secrets: bool = typer.Option(
+        False, "--unsafe-show-secrets", help="Do not mask sensitive values"
+    ),
+) -> None:
+    """Show the effective configuration merged from all sources."""
+    import json as _json
+    import yaml as _yaml
+    from .config import load_config as _load_config
+    from .errors import ConfigValidationError as _ConfigValidationError
+
+    if json_output and yaml_output:
+        typer.echo("Error: --yaml and --json are mutually exclusive", err=True)
+        raise typer.Exit(1)
+
+    mas = project_dir()
+
+    config_path = mas / "config.yaml"
+    if config_path.exists():
+        try:
+            _yaml.safe_load(config_path.read_text())
+        except _yaml.YAMLError as exc:
+            typer.echo(f"Error: invalid YAML in {config_path}: {exc}", err=True)
+            raise typer.Exit(1)
+
+    try:
+        config = _load_config(mas)
+    except _ConfigValidationError as exc:
+        typer.echo(f"Validation error: {exc}", err=True)
+        raise typer.Exit(1)
+
+    data = {
+        "config": config.model_dump(),
+        "roles": {name: rc.model_dump() for name, rc in config.roles.items()},
+    }
+
+    if not unsafe_show_secrets:
+        data = _mask_secrets(data)
+
+    if field is not None:
+        value = data
+        for seg in field.split("."):
+            if isinstance(value, dict):
+                if seg not in value:
+                    typer.echo(f"Field not found: {field}", err=True)
+                    raise typer.Exit(2)
+                value = value[seg]
+            elif isinstance(value, list):
+                if seg.isdigit() and int(seg) < len(value):
+                    value = value[int(seg)]
+                else:
+                    typer.echo(f"Field not found: {field}", err=True)
+                    raise typer.Exit(2)
+            else:
+                typer.echo(f"Field not found: {field}", err=True)
+                raise typer.Exit(2)
+        if isinstance(value, (dict, list)):
+            if json_output:
+                typer.echo(_json.dumps(value, indent=2, sort_keys=False))
+            else:
+                typer.echo(_yaml.safe_dump(value, sort_keys=False), nl=False)
+        else:
+            typer.echo(str(value))
+        return
+
+    if json_output:
+        typer.echo(_json.dumps(data, indent=2, sort_keys=False))
+    else:
+        typer.echo(_yaml.safe_dump(data, sort_keys=False), nl=False)
 
 
 @daemon_app.command("start")
