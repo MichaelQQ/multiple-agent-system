@@ -5,6 +5,7 @@ and POST actions invoke the same board/daemon helpers the CLI uses.
 """
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -316,3 +317,94 @@ def test_daemon_stop_delegates_to_helper(project: Path, client: TestClient, monk
     r = client.post("/daemon/stop", follow_redirects=False)
     assert r.status_code == 303
     assert calls == [project.resolve()]
+
+
+# ---------------------------------------------------------------------------
+# /config/roles tests
+# ---------------------------------------------------------------------------
+
+def test_config_roles_get_renders_current_file_content(project: Path, client: TestClient):
+    mas = project / ".mas"
+    roles_content = "proposer:\n  provider: claude-code\ntester:\n  provider: codex\n"
+    (mas / "roles.yaml").write_text(roles_content)
+
+    r = client.get("/config/roles")
+    assert r.status_code == 200
+    assert "<textarea" in r.text
+    assert roles_content in r.text
+
+
+def test_config_roles_post_valid_yaml_writes_file_and_shows_saved_banner(project: Path, client: TestClient):
+    mas = project / ".mas"
+    roles_yaml = mas / "roles.yaml"
+    roles_yaml.write_text("proposer:\n  provider: claude-code\n")
+
+    new_content = "proposer:\n  provider: codex\n"
+    r = client.post("/config/roles", data={"content": new_content})
+    assert r.status_code == 200
+    assert "Saved" in r.text
+    assert roles_yaml.read_text() == new_content
+    # banner must mention the new mtime (any numeric representation is acceptable)
+    mtime = int(roles_yaml.stat().st_mtime)
+    assert str(mtime) in r.text or "Saved" in r.text
+
+
+def test_config_roles_post_malformed_yaml_returns_error_and_file_unchanged(project: Path, client: TestClient):
+    mas = project / ".mas"
+    roles_yaml = mas / "roles.yaml"
+    original = "proposer:\n  provider: claude-code\n"
+    roles_yaml.write_text(original)
+    original_hash = hashlib.md5(original.encode()).hexdigest()
+
+    bad_yaml = "proposer: {unclosed: [bracket"
+    r = client.post("/config/roles", data={"content": bad_yaml})
+    assert r.status_code in (400, 422)
+    assert hashlib.md5(roles_yaml.read_bytes()).hexdigest() == original_hash
+    assert bad_yaml in r.text
+    assert "error" in r.text.lower()
+
+
+def test_config_roles_post_pydantic_invalid_returns_error_and_file_unchanged(project: Path, client: TestClient):
+    mas = project / ".mas"
+    roles_yaml = mas / "roles.yaml"
+    original = "proposer:\n  provider: claude-code\n"
+    roles_yaml.write_text(original)
+
+    # valid YAML but missing required 'provider' → pydantic validation fails
+    invalid_config = "proposer:\n  model: haiku\n  timeout_s: 600\n"
+    r = client.post("/config/roles", data={"content": invalid_config})
+    assert r.status_code in (400, 422)
+    assert roles_yaml.read_text() == original
+    assert invalid_config in r.text
+    assert "error" in r.text.lower()
+
+
+def test_config_roles_post_atomic_write_failure_leaves_original_intact(
+    project: Path, client: TestClient, monkeypatch
+):
+    mas = project / ".mas"
+    roles_yaml = mas / "roles.yaml"
+    original = "proposer:\n  provider: claude-code\n"
+    roles_yaml.write_text(original)
+
+    def _fail_replace(src, dst):
+        raise OSError("simulated disk full")
+
+    monkeypatch.setattr("mas.web.app.os.replace", _fail_replace)
+
+    new_content = "proposer:\n  provider: codex\n"
+    r = client.post("/config/roles", data={"content": new_content})
+    # route must handle the failure gracefully, not 500-crash
+    assert r.status_code == 200
+    # original file byte-identical
+    assert roles_yaml.read_text() == original
+    # no leftover .tmp files
+    assert list(mas.glob("*.tmp")) == []
+    # submitted text re-shown in textarea
+    assert new_content in r.text
+
+
+def test_config_nav_has_config_link_to_roles_page(project: Path, client: TestClient):
+    r = client.get("/")
+    assert r.status_code == 200
+    assert 'href="/config/roles"' in r.text

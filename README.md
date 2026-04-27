@@ -311,14 +311,24 @@ mas web --host 127.0.0.1 --port 8765
 
 The local UI shows the board, task details, recent audit events, cost totals,
 and log tails. Tasks within each column are sorted by most recent transition
-(newest first). The header navigation exposes four pages:
+(newest first). The header navigation exposes five pages:
 
-| Page        | Route       | Purpose                                                           |
-|-------------|-------------|-------------------------------------------------------------------|
-| Board       | `/`         | Kanban view; run tick, start/stop daemon, prune, upgrade          |
-| Events      | `/events`   | Cross-task audit feed with `task/role/status/event/limit` filters |
-| Validate    | `/validate` | Runs `validate_environment` and shows providers/roles summary     |
-| Cron        | `/cron`     | Inspect, install, and uninstall the per-project cron entry        |
+| Page        | Route          | Purpose                                                           |
+|-------------|----------------|-------------------------------------------------------------------|
+| Board       | `/`            | Kanban view; run tick, start/stop daemon, prune, upgrade          |
+| Events      | `/events`      | Cross-task audit feed with `task/role/status/event/limit` filters |
+| Validate    | `/validate`    | Runs `validate_environment` and shows providers/roles summary     |
+| Cron        | `/cron`        | Inspect, install, and uninstall the per-project cron entry        |
+| Config      | `/config/roles`| Edit `.mas/roles.yaml` in-browser with YAML + pydantic validation |
+
+The **Config → Roles** page (`/config/roles`) lets you edit `.mas/roles.yaml`
+directly in the browser. On submit, the content is validated as YAML and then
+against the `dict[str, RoleConfig]` pydantic schema. A validation failure
+returns an error banner with the submitted text preserved; the file is not
+written. On success, the file is written atomically via a temporary file +
+`os.replace()` so a partial write never corrupts the live config. The
+daemon's `ConfigWatcher` detects the new modification time before its next
+tick cycle and reloads the config without requiring a restart.
 
 Actions available from the board and task pages mirror the CLI: `tick`,
 `promote`, `retry`, `delete`, `prune`, `daemon start/stop`, and `upgrade`
