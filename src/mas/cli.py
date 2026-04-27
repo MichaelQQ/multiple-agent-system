@@ -503,6 +503,10 @@ def _reset_task_state(task_dir: Path) -> None:
     (task_dir / ".previous_failure").unlink(missing_ok=True)
     # Remove plan so orchestrator re-runs from scratch
     (task_dir / "plan.json").unlink(missing_ok=True)
+    # Per-attempt logs gate orphan detection (`{role}-{attempt}.log`); leaving
+    # them in place after an attempt-counter reset would make tick treat the
+    # next attempt as a stale orphan and re-fail without dispatching.
+    _clear_attempt_logs(task_dir / "logs")
     # Reset each subtask: remove results, attempt counter, and failure markers
     subtasks_root = task_dir / "subtasks"
     if subtasks_root.exists():
@@ -516,6 +520,14 @@ def _reset_task_state(task_dir: Path) -> None:
             attempt_file = child_dir / ".attempt"
             if attempt_file.exists():
                 attempt_file.write_text("1")
+            _clear_attempt_logs(child_dir / "logs")
+
+
+def _clear_attempt_logs(log_dir: Path) -> None:
+    if not log_dir.exists():
+        return
+    for f in log_dir.glob("*.log"):
+        f.unlink(missing_ok=True)
 
 
 @app.command()

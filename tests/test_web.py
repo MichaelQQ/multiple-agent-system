@@ -176,6 +176,34 @@ def test_retry_moves_failed_to_doing_and_resets(project: Path, client: TestClien
     assert not (moved / "plan.json").exists()
 
 
+def test_retry_clears_per_attempt_logs(project: Path, client: TestClient):
+    """Stale `{role}-{attempt}.log` files trip orphan detection in the next
+    tick after attempt counters are reset, so retry must wipe them too."""
+    mas = project / ".mas"
+    task_id = "20260424-stale-aaaa"
+    tdir = _put_task(mas, "failed", task_id, role="orchestrator")
+    (tdir / ".orchestrator_attempt").write_text("3")
+    (tdir / ".previous_failure").write_text("prev")
+    (tdir / "logs").mkdir()
+    for i in (1, 2, 3):
+        (tdir / "logs" / f"orchestrator-{i}.log").write_text(f"attempt {i}\n")
+    child = tdir / "subtasks" / "impl-1"
+    child.mkdir(parents=True)
+    (child / ".attempt").write_text("3")
+    (child / "logs").mkdir()
+    (child / "logs" / "implementer-1.log").write_text("attempt 1\n")
+    (child / "logs" / "implementer-2.log").write_text("attempt 2\n")
+
+    r = client.post(f"/task/{task_id}/retry", follow_redirects=False)
+    assert r.status_code == 303
+    moved = mas / "tasks" / "doing" / task_id
+
+    assert not list((moved / "logs").glob("*.log"))
+    assert not (moved / ".orchestrator_attempt").exists()
+    assert not list((moved / "subtasks" / "impl-1" / "logs").glob("*.log"))
+    assert (moved / "subtasks" / "impl-1" / ".attempt").read_text().strip() == "1"
+
+
 def test_delete_removes_task_from_any_column(project: Path, client: TestClient):
     mas = project / ".mas"
     for col in ("proposed", "doing", "done", "failed"):
