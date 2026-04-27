@@ -66,6 +66,19 @@ mas audit   <id>              # display structured audit timeline for a task
 mas events  [--follow] [--json] [filters…]  # aggregate events across all tasks
 mas cost    <id>              # print per-subtask token/cost breakdown
 mas stats                     # print aggregate board/role/provider/token statistics
+mas config show               # print fully-resolved config (YAML by default)
+mas config show --json        # emit as JSON
+mas config show --field daemon.log_max_bytes   # print a single field value
+```
+
+### Config inspection
+
+`mas config show` prints the fully-resolved `MasConfig` and roles map as YAML (default) or JSON (`--json`), merging project `.mas/config.yaml` with any user defaults in `~/.config/mas/`. Use `--field <dotted.path>` to extract a single value (supports nested keys and list indices, e.g. `roles.implementer.timeout_s`); the command exits 2 with an error on stderr when the path is not found. String values whose key name contains `key`, `token`, `secret`, or `password` — and URL query-string parameters with matching names — are redacted to `***` by default; pass `--unsafe-show-secrets` to suppress masking.
+
+```sh
+mas config show                                         # full config as YAML
+mas config show --field daemon.log_max_bytes            # single scalar value
+mas config show --json --field roles.implementer.timeout_s  # JSON output, single field
 ```
 
 ### Observability
