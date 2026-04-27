@@ -900,5 +900,42 @@ def web(
     )
 
 
+@app.command()
+def doctor(
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON instead of Rich table"),
+    strict: bool = typer.Option(False, "--strict", help="Exit 1 even if only warnings found"),
+) -> None:
+    """Run system health checks (Config, Provider, Board/Worktree, Daemon)."""
+    import json as _json
+
+    from .config import project_dir
+    from .doctor import run_checks
+
+    mas = project_dir()
+    checks = run_checks(mas)
+
+    fail_count = sum(1 for c in checks if c["status"] == "FAIL")
+    warn_count = sum(1 for c in checks if c["status"] == "WARN")
+    ok_count = sum(1 for c in checks if c["status"] == "OK")
+
+    if json_output:
+        typer.echo(_json.dumps({"checks": list(checks), "summary": {"ok": ok_count, "warn": warn_count, "fail": fail_count}}))
+    else:
+        table = Table("Check", "Status", "Detail")
+        status_colors = {"OK": "green", "WARN": "yellow", "FAIL": "red"}
+        for c in checks:
+            status = c["status"]
+            color = status_colors.get(status, "white")
+            table.add_row(
+                f"{c['group']} / {c['name']}",
+                f"[{color}]{status}[/{color}]",
+                c["detail"],
+            )
+        console.print(table)
+
+    if fail_count > 0 or (strict and warn_count > 0):
+        raise typer.Exit(1)
+
+
 if __name__ == "__main__":
     app()

@@ -66,6 +66,7 @@ mas audit   <id>              # display structured audit timeline for a task
 mas events  [--follow] [--json] [filters…]  # aggregate events across all tasks
 mas cost    <id>              # print per-subtask token/cost breakdown
 mas stats                     # print aggregate board/role/provider/token statistics
+mas doctor                    # diagnose environment: config, providers, board, daemon
 ```
 
 ### Observability
@@ -197,6 +198,47 @@ Validation runs automatically before `mas tick` and `mas daemon start` to preven
 A tick is safe to run any time — it takes a flock, reaps dead workers,
 advances the state machine, then dispatches new work within per-provider
 concurrency caps.
+
+### Diagnostics
+
+`mas doctor` inspects your environment and prints a summary table of check results across four groups:
+
+```sh
+mas doctor                    # table output (default)
+mas doctor --json             # JSON output: {checks: [...], summary: {ok, warn, fail}}
+mas doctor --strict           # treat WARN as failure (exit 1 if any WARNs)
+```
+
+**Check groups:**
+
+| Group    | What is checked                                                    |
+|----------|--------------------------------------------------------------------|
+| Config   | `config.yaml` / `roles.yaml` parse and schema validation           |
+| Provider | Each used provider's CLI binary is present in PATH                 |
+| Board    | Orphan git worktrees (`mas/<id>` branches with no task dir), stale worker PID files |
+| Daemon   | `daemon.pid` liveness (missing pid file is OK; dead PID is FAIL)   |
+
+**Exit codes:**
+
+| Exit | Meaning                                             |
+|------|-----------------------------------------------------|
+| 0    | All checks passed (OK or WARN without `--strict`)   |
+| 1    | One or more FAIL checks, or WARN checks with `--strict` |
+
+**JSON output format** (`--json`):
+
+```json
+{
+  "checks": [
+    {"group": "Config",   "name": "config",          "status": "OK",   "detail": "Config and roles are valid"},
+    {"group": "Provider", "name": "provider:claude-code", "status": "OK", "detail": "CLI 'claude' found"},
+    {"group": "Board",    "name": "worktrees",        "status": "OK",   "detail": "No orphan worktrees"},
+    {"group": "Board",    "name": "pids",             "status": "OK",   "detail": "No stale worker PID files"},
+    {"group": "Daemon",   "name": "daemon",           "status": "OK",   "detail": "No daemon.pid file"}
+  ],
+  "summary": {"ok": 5, "warn": 0, "fail": 0}
+}
+```
 
 ### Human gates (only two)
 
@@ -457,6 +499,6 @@ See `tests/e2e/scripts/` for examples of role scripts.
 
 Implemented: `init`, `upgrade`, `validate`, `tick`, `show`, `promote`,
 `retry`, `delete`, `logs`, `tail`, `audit`, `cost`, `stats`, `prune`,
-`cron`, `daemon`, and the optional `web` UI. Out of scope (v2):
-`mas pr`, `mas kill`, `mas doctor`, launchd, parallel child execution,
+`cron`, `daemon`, `doctor`, and the optional `web` UI. Out of scope (v2):
+`mas pr`, `mas kill`, launchd, parallel child execution,
 auto-PR/merge.
