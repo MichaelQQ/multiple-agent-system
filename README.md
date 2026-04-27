@@ -262,6 +262,36 @@ mas stats --json              # emit raw JSON instead of a Rich table
 
 With `--json` the output is a single JSON object — useful for piping into `jq` or dashboards.
 
+## Trace
+
+`mas trace <task-id>` shows a per-task stage-by-stage wall-clock timeline across all subtask roles (orchestrator, implementer, tester, evaluator), ordered by start time and coloured by status (green = success, red = failure, yellow = running). Each row includes the role label with revision cycle (e.g. `implementer[rev-0]`), `started_at`, `ended_at`, duration in seconds, status, and cost. In-flight stages (dispatched but not yet complete) are shown with `status=running` and no end time.
+
+```sh
+mas trace 20260424-my-task-ab12          # Rich table, colour-coded by status
+mas trace 20260424-my-task-ab12 --json   # JSON object with task metadata and stages array
+```
+
+Example `--json` output:
+
+```json
+{
+  "task_id": "20260424-my-task-ab12",
+  "goal": "...",
+  "started_at": "2026-04-24T10:00:00Z",
+  "ended_at": "2026-04-24T10:10:00Z",
+  "total_duration_s": 600.0,
+  "total_cost_usd": 0.024,
+  "stages": [
+    {"subtask_id": "...", "role": "implementer", "cycle": "rev-0",
+     "started_at": "2026-04-24T10:00:00Z", "ended_at": "2026-04-24T10:08:00Z",
+     "duration_s": 480.0, "status": "success", "cost_usd": 0.012},
+    {"subtask_id": "...", "role": "tester", "cycle": "rev-0",
+     "started_at": "2026-04-24T10:08:05Z", "ended_at": null,
+     "duration_s": null, "status": "running", "cost_usd": null}
+  ]
+}
+```
+
 ## Upgrading templates
 
 ```sh
