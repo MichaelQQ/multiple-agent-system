@@ -888,5 +888,79 @@ def web(
     )
 
 
+@app.command()
+def trace(
+    task_id: str = typer.Argument(..., help="Task ID to trace"),
+    json_out: bool = typer.Option(False, "--json", "-j", help="Output trace as JSON"),
+) -> None:
+    """Trace the lifecycle of a task and its subtasks."""
+    from . import trace as trace_mod
+
+    mas = project_dir()
+    task_dir = None
+    for column in ("doing", "done", "failed"):
+        candidate = mas / "tasks" / column / task_id
+        if candidate.is_dir():
+            task_dir = candidate
+            break
+
+    if task_dir is None:
+        typer.echo(f"Task '{task_id}' not found")
+        raise typer.Exit(1)
+
+    trace_data = trace_mod.build_trace(task_dir)
+    stages = trace_data["stages"]
+
+    if json_out:
+        typer.echo(json.dumps(trace_data))
+        return
+
+    if not stages:
+        typer.echo("no stage data yet")
+        return
+
+    console.print(f"[bold]Task:[/bold] {trace_data['task_id']}")
+    console.print(f"[bold]Goal:[/bold] {trace_data['goal']}")
+    console.print(f"[bold]Started:[/bold] {trace_data['started_at']}")
+    console.print(f"[bold]Ended:[/bold] {trace_data['ended_at']}")
+    console.print(f"[bold]Duration:[/bold] {trace_data['total_duration_s']:.1f}s  "
+                  f"[bold]Cost:[/bold] ${trace_data['total_cost_usd']:.4f}")
+    console.print()
+
+    _COLOR = {
+        "success": "green",
+        "failure": "red",
+        "needs_revision": "yellow",
+        "running": "dim",
+        "in_progress": "dim",
+    }
+
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Stage", style="cyan")
+    table.add_column("Status")
+    table.add_column("Started")
+    table.add_column("Duration")
+    table.add_column("Cost")
+
+    from rich.markup import escape as _escape
+
+    for s in stages:
+        label = f"{s['role']}[{s['cycle']}]"
+        status = s["status"]
+        color = _COLOR.get(status, "white")
+        started = (s.get("started_at") or "")[:19]
+        dur = f"{s['duration_s']:.1f}s" if s["duration_s"] is not None else "..."
+        cost = f"${s['cost_usd']:.4f}" if s["cost_usd"] is not None else "-"
+        table.add_row(
+            f"[{color}]{_escape(label)}[/{color}]",
+            f"[{color}]{status}[/{color}]",
+            started,
+            dur,
+            cost,
+        )
+
+    console.print(table)
+
+
 if __name__ == "__main__":
     app()
