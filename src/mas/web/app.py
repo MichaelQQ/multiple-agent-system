@@ -6,20 +6,30 @@ used by the CLI (board.move, daemon.start/stop). Bind to 127.0.0.1; no auth.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import yaml
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import TypeAdapter
 
 from .. import board, cron, daemon, transitions, worktree
 from ..audit import read_events
 from ..config import load_config, project_dir, project_root, validate_environment
 from ..events import read_board_events
+from ..schemas import RoleConfig
+
+_roles_adapter: TypeAdapter = TypeAdapter(dict[str, RoleConfig])
+
+
+def _validate_roles_yaml(data: object) -> None:
+    _roles_adapter.validate_python(data)
 
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
 
@@ -487,6 +497,53 @@ def create_app(project: Path | None = None) -> FastAPI:
     def daemon_stop():
         daemon.stop(proj)
         return RedirectResponse("/", status_code=303)
+
+    @app.get("/config/roles", response_class=HTMLResponse)
+    def config_roles_get(request: Request):
+        roles_path = mas / "roles.yaml"
+        content = roles_path.read_text() if roles_path.exists() else ""
+        return templates.TemplateResponse(
+            request,
+            "config_roles.html",
+            {"content": content, "banner": None, "error": None},
+        )
+
+    @app.post("/config/roles", response_class=HTMLResponse)
+    def config_roles_post(request: Request, content: str = Form(...)):
+        roles_path = mas / "roles.yaml"
+        try:
+            data = yaml.safe_load(content)
+            _validate_roles_yaml(data)
+        except Exception as e:
+            return templates.TemplateResponse(
+                request,
+                "config_roles.html",
+                {"content": content, "banner": None, "error": str(e)},
+                status_code=400,
+            )
+
+        tmp_path = mas / f"roles.yaml.{os.getpid()}.tmp"
+        try:
+            tmp_path.write_text(content)
+            os.replace(str(tmp_path), str(roles_path))
+        except Exception as e:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return templates.TemplateResponse(
+                request,
+                "config_roles.html",
+                {"content": content, "banner": None, "error": str(e)},
+                status_code=200,
+            )
+
+        mtime = int(roles_path.stat().st_mtime)
+        return templates.TemplateResponse(
+            request,
+            "config_roles.html",
+            {"content": content, "banner": f"Saved (mtime: {mtime})", "error": None},
+        )
 
     return app
 

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Config – Roles · mas{% endblock %}
+{% block content %}
+<h1>Config – Roles</h1>
+{% if banner %}
+<div class="flash" style="background:#ecfdf5;border-color:#a7f3d0;color:#065f46;">{{ banner }}</div>
+{% endif %}
+{% if error %}
+<div class="flash" style="background:#fef2f2;border-color:#fca5a5;color:#991b1b;">Error: {{ error }}</div>
+{% endif %}
+<form method="post" action="/config/roles">
+  <div style="margin-bottom:10px;">
+    <textarea name="content" rows="30" style="width:100%;font-family:monospace;font-size:13px;padding:8px;border:1px solid var(--border);border-radius:6px;">{{ content }}</textarea>
+  </div>
+  <button type="submit">Save</button>
+</form>
+{% endblock %}
