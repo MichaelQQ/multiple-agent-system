@@ -19,7 +19,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import TypeAdapter
 
-from .. import board, cron, daemon, transitions, worktree
+from .. import board, cron, current_subtask, daemon, transitions, worktree
 from ..audit import read_events
 from ..config import load_config, project_dir, project_root, validate_environment
 from ..events import read_board_events
@@ -193,6 +193,12 @@ def _task_detail(mas: Path, task_id: str) -> dict[str, Any]:
 
     budget = getattr(task, "cost_budget_usd", None)
 
+    marker = _read_current_subtask_marker(tdir)
+    current_subtask_info = None
+    if marker is not None:
+        elapsed = _get_elapsed_s(marker["start_time_iso"])
+        current_subtask_info = {**marker, "elapsed_s": elapsed}
+
     return {
         "column": col,
         "task": task,
@@ -204,6 +210,7 @@ def _task_detail(mas: Path, task_id: str) -> dict[str, Any]:
         "audit": audit,
         "logs": logs,
         "task_dir": tdir,
+        "current_subtask": current_subtask_info,
     }
 
 
@@ -558,6 +565,7 @@ def _reset_task_state(task_dir: Path) -> None:
     # them in place after an attempt-counter reset would make tick treat the
     # next attempt as a stale orphan and re-fail without dispatching.
     _clear_attempt_logs(task_dir / "logs")
+    (task_dir / ".current_subtask").unlink(missing_ok=True)
     subtasks_root = task_dir / "subtasks"
     if subtasks_root.exists():
         for child_dir in subtasks_root.iterdir():
@@ -578,3 +586,11 @@ def _clear_attempt_logs(log_dir: Path) -> None:
         return
     for f in log_dir.glob("*.log"):
         f.unlink(missing_ok=True)
+
+
+def _read_current_subtask_marker(tdir: Path) -> dict | None:
+    return current_subtask._read_current_subtask_marker(tdir)
+
+
+def _get_elapsed_s(start_time_iso: str) -> float:
+    return current_subtask._get_elapsed_s(start_time_iso)

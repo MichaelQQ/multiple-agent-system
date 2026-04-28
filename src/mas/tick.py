@@ -7,10 +7,11 @@ import logging
 import os
 import shutil
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
-from . import audit, board, transitions, worktree
+from . import audit, board, current_subtask, transitions, worktree
 from .adapters import AdapterUnavailableError, get_adapter
 from .config import load_config, project_root, project_dir, validate_config, ConfigWatcher
 from .ids import task_id as new_task_id
@@ -271,6 +272,7 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
         result = _synthesize_orphan_result(child_dir, next_child.id, next_child.role, child_attempt)
 
     if result is not None:
+        current_subtask._delete_current_subtask_marker(parent_dir)
         from . import verify as _verify
         result = _verify.verify_child_result(next_child, result, child_dir, child_attempt)
         if next_child.role == "evaluator":
@@ -289,7 +291,14 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
         cycle=parent_task.cycle,
         attempt=child_attempt,
     )
-    _dispatch_role(env, child_task, child_dir, wt, role=next_child.role)
+    pid = _dispatch_role(env, child_task, child_dir, wt, role=next_child.role)
+    current_subtask._write_current_subtask_marker(
+        parent_dir,
+        role=next_child.role,
+        provider=env.cfg.roles[next_child.role].provider,
+        pid=pid or 0,
+        subtask_id=next_child.id,
+    )
     audit.append_event(
         parent_dir,
         event="dispatch",
@@ -599,6 +608,7 @@ def _check_cost_budget(
 
 
 def _finalize_parent(env: TickEnv, parent_dir: Path, parent_task) -> None:
+    current_subtask._delete_current_subtask_marker(parent_dir)
     wt = parent_dir / "worktree"
     if wt.exists():
         worktree.commit_changes(wt, parent_task.goal)
@@ -806,7 +816,7 @@ def _dispatch_role(
     cwd: Path,
     *,
     role: Role,
-) -> None:
+) -> int | None:
     role_cfg = env.cfg.roles[role]
     prov_cfg = env.cfg.providers[role_cfg.provider]
 
@@ -868,5 +878,6 @@ def _dispatch_role(
         )
         (task_dir / "result.json").write_text(result.model_dump_json(indent=2))
         board.move(task_dir, env.mas / "tasks" / "failed" / task.id, reason="adapter_unavailable")
-        return
+        return None
     board.write_pid(task_dir / "pids", role, role_cfg.provider, handle.pid)
+    return handle.pid

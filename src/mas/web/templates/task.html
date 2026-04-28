@@ -65,6 +65,12 @@
 </table>
 {% endif %}
 
+{% if current_subtask is not none %}
+<p class="current-running">Currently running: {{ current_subtask.role }} ({{ current_subtask.provider }}, PID {{ current_subtask.pid }}) &middot; {{ current_subtask.elapsed_s|int }}s elapsed <span class="meta">({{ current_subtask.subtask_id }})</span></p>
+{% elif column == 'doing' %}
+<p class="current-idle">No subtask currently running</p>
+{% endif %}
+
 {% if subtasks %}
 <h2>Subtasks <span class="pill">{{ subtasks|length }}</span></h2>
 <table>

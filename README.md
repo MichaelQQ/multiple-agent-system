@@ -353,6 +353,7 @@ mas web --host 127.0.0.1 --port 8765
 ```
 
 The local UI shows the board, task details, recent audit events, cost totals,
+<<<<<<< HEAD
 and log tails. Tasks within each column are sorted by most recent transition
 (newest first). The header navigation exposes five pages:
 
@@ -381,9 +382,10 @@ button for bulk deletion. The task detail page shows a collapsible
 **Task info** section (id, role, column, parent, created, cycle/attempt,
 budget, inputs, constraints, previous failure), plus plan/subtasks, audit
 timeline, transitions, cost totals with the per-task budget row, and a
-tabbed log viewer. Task goals, result summaries/feedback, and
+tabbed log viewer. **Task detail views display the currently executing subtask**, showing role, provider, PID, and elapsed time. Task goals, result summaries/feedback, and
 previous-failure text are rendered as Markdown (headings, lists, fenced
 code, tables).
+
 
 It is designed for local loopback use and has no auth layer.
 
