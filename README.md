@@ -74,6 +74,7 @@ mas pr      <id>              # open a GitHub PR for a done task
 mas pr      <id> --draft      # open as a draft PR
 mas pr      <id> --base main  # override target branch
 mas pr      <id> --reviewer handle  # request a reviewer (repeatable)
+mas proposals rejected [--since 7d] [--limit 50] [--json]  # list rejected duplicate proposals
 ```
 
 ### Config inspection
@@ -358,6 +359,26 @@ Example `--json` output:
   ]
 }
 ```
+
+## Proposals
+
+### Rejected proposals
+
+When the proposer's similarity check drops a duplicate task, the tick loop appends a record to `.mas/proposals/rejected.jsonl`. The file is written lazily — it is created on the first rejection and does not require `mas init` or `mas upgrade`.
+
+```sh
+mas proposals rejected                      # newest-first table (default limit 50)
+mas proposals rejected --since 7d           # last 7 days (also accepts: h, d, w suffixes)
+mas proposals rejected --limit 20 --json    # NDJSON output
+```
+
+| Flag | Description |
+|---|---|
+| `--since <Nh\|Nd\|Nw>` | Filter records newer than the given duration |
+| `--limit N` | Cap results (default 50) |
+| `--json` | Emit one JSON object per line instead of a Rich table |
+
+Exits 0 when the log is missing or empty. Malformed lines are skipped with a `WARNING` and do not crash the command.
 
 ## Upgrading templates
 
