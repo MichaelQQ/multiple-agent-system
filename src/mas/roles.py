@@ -30,6 +30,9 @@ Your last action MUST be writing a valid `result.json` to the path in the
   "duration_s": float,
   "cost_usd": float | null
 }
+
+Use ONLY these keys. The schema is strict (`extra="forbid"`); any additional
+top-level field will be rejected and the task will fail with a validation error.
 """.strip()
 
 
