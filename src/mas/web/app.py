@@ -24,6 +24,7 @@ from ..audit import read_events
 from ..config import load_config, project_dir, project_root, validate_environment
 from ..events import read_board_events
 from ..schemas import RoleConfig
+from ..trace import build_trace
 
 _roles_adapter: TypeAdapter = TypeAdapter(dict[str, RoleConfig])
 
@@ -504,6 +505,47 @@ def create_app(project: Path | None = None) -> FastAPI:
     def daemon_stop():
         daemon.stop(proj)
         return RedirectResponse("/", status_code=303)
+
+    @app.get("/trace/{task_id}", response_class=HTMLResponse)
+    def trace_view(task_id: str, request: Request):
+        located = board.find_task(mas, task_id)
+        if located is None:
+            raise HTTPException(404, f"task not found: {task_id}")
+        _, tdir = located
+
+        trace_data = build_trace(tdir)
+
+        try:
+            task = board.read_task(tdir)
+            role = task.role
+        except Exception:
+            role = ""
+
+        total_tokens_in = 0
+        total_tokens_out = 0
+        subs_root = tdir / "subtasks"
+        if subs_root.exists():
+            for sub_dir in subs_root.iterdir():
+                if sub_dir.is_dir():
+                    r = board.read_result(sub_dir)
+                    if r is not None:
+                        total_tokens_in += r.tokens_in or 0
+                        total_tokens_out += r.tokens_out or 0
+
+        return templates.TemplateResponse(
+            request,
+            "trace.html",
+            {
+                "task_id": task_id,
+                "role": role,
+                "goal": trace_data["goal"],
+                "total_duration_s": trace_data["total_duration_s"],
+                "total_tokens_in": total_tokens_in,
+                "total_tokens_out": total_tokens_out,
+                "total_cost_usd": trace_data["total_cost_usd"],
+                "stages": trace_data["stages"],
+            },
+        )
 
     @app.get("/config/roles", response_class=HTMLResponse)
     def config_roles_get(request: Request):

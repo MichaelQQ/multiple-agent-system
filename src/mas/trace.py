@@ -80,12 +80,22 @@ def build_trace(task_dir: Path, *, now: datetime | None = None) -> dict[str, Any
             duration_s = ev.get("duration_s")
             status = ev.get("status", "success")
 
+            provider = ev.get("provider") or dispatch_ev.get("provider") or ""
             cost_usd: float | None = None
+            tokens_in: int | None = None
+            tokens_out: int | None = None
             result_path = _subtask_result_dir(task_dir, subtask_id, cycle) / "result.json"
+            if not result_path.exists():
+                # Also check the subtasks/ subdirectory layout used by board helpers
+                alt = task_dir / "subtasks" / subtask_id / "result.json"
+                if alt.exists():
+                    result_path = alt
             if result_path.exists():
                 try:
                     result_data = json.loads(result_path.read_text(encoding="utf-8"))
                     cost_usd = result_data.get("cost_usd")
+                    tokens_in = result_data.get("tokens_in")
+                    tokens_out = result_data.get("tokens_out")
                 except (json.JSONDecodeError, OSError):
                     pass
 
@@ -98,6 +108,9 @@ def build_trace(task_dir: Path, *, now: datetime | None = None) -> dict[str, Any
                 "duration_s": duration_s,
                 "status": status,
                 "cost_usd": cost_usd,
+                "provider": provider,
+                "tokens_in": tokens_in,
+                "tokens_out": tokens_out,
             })
 
     for (subtask_id, cycle), dispatch_ev in pending.items():
@@ -115,6 +128,9 @@ def build_trace(task_dir: Path, *, now: datetime | None = None) -> dict[str, Any
             "duration_s": duration_s,
             "status": "running",
             "cost_usd": None,
+            "provider": dispatch_ev.get("provider") or "",
+            "tokens_in": None,
+            "tokens_out": None,
         })
 
     stages.sort(key=lambda s: s.get("started_at") or "")

@@ -478,13 +478,14 @@ The local UI shows the board, task details, recent audit events, cost totals,
 and log tails. Tasks within each column are sorted by most recent transition
 (newest first). The header navigation exposes five pages:
 
-| Page        | Route          | Purpose                                                           |
-|-------------|----------------|-------------------------------------------------------------------|
-| Board       | `/`            | Kanban view; run tick, start/stop daemon, prune, upgrade          |
-| Events      | `/events`      | Cross-task audit feed with `task/role/status/event/limit` filters |
-| Validate    | `/validate`    | Runs `validate_environment` and shows providers/roles summary     |
-| Cron        | `/cron`        | Inspect, install, and uninstall the per-project cron entry        |
-| Config      | `/config/roles`| Edit `.mas/roles.yaml` in-browser with YAML + pydantic validation |
+| Page        | Route                 | Purpose                                                           |
+|-------------|------------------------|-------------------------------------------------------------------|
+| Board       | `/`                   | Kanban view; run tick, start/stop daemon, prune, upgrade          |
+| Events      | `/events`             | Cross-task audit feed with `task/role/status/event/limit` filters |
+| Validate    | `/validate`           | Runs `validate_environment` and shows providers/roles summary     |
+| Cron        | `/cron`               | Inspect, install, and uninstall the per-project cron entry        |
+| Config      | `/config/roles`       | Edit `.mas/roles.yaml` in-browser with YAML + pydantic validation |
+| Trace       | `/trace/<task_id>`    | Per-task stage-by-stage timeline: role, wall-clock, tokens, cost, and status for each subtask; in-flight stages highlighted |
 
 The **Config → Roles** page (`/config/roles`) lets you edit `.mas/roles.yaml`
 directly in the browser. On submit, the content is validated as YAML and then

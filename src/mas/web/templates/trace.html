@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Trace: {{ task_id }}{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h2>Trace <span class="mono">{{ task_id }}</span></h2>
+  <table>
+    <tr><th style="width:140px">Task ID</th><td class="mono">{{ task_id }}</td></tr>
+    <tr><th>Role</th><td><span class="pill pill-role">{{ role }}</span></td></tr>
+    <tr><th>Goal</th><td>{{ goal }}</td></tr>
+    <tr><th>Wall-clock</th><td class="mono">{{ "%.1f"|format(total_duration_s) }}s</td></tr>
+    <tr><th>Tokens</th><td class="mono">{{ total_tokens_in }}/{{ total_tokens_out }}</td></tr>
+    <tr><th>Cost</th><td class="mono">${{ "%.6f"|format(total_cost_usd) }}</td></tr>
+  </table>
+  <div class="actions" style="margin-top:10px">
+    <a href="/task/{{ task_id }}"><button type="button" class="ghost">← Task detail</button></a>
+    <a href="/"><button type="button" class="ghost">← Board</button></a>
+  </div>
+</div>
+
+<h2>Timeline</h2>
+{% if stages %}
+{% set max_dur = namespace(val=1.0) %}
+{% for s in stages %}
+  {% if s.duration_s is not none and s.duration_s > max_dur.val %}{% set max_dur.val = s.duration_s %}{% endif %}
+{% endfor %}
+<div class="timeline-container">
+  {% for s in stages %}
+    {% set dur = s.duration_s if s.duration_s is not none and s.duration_s > 0 else 1.0 %}
+    {% set width_pct = ((dur / max_dur.val) * 100) | round | int %}
+    {% if s.status == "running" %}{% set bar_class = "in-flight" %}
+    {% elif s.status == "failure" %}{% set bar_class = "status-failure" %}
+    {% elif s.status == "needs_revision" or s.status == "timeout" %}{% set bar_class = "status-amber" %}
+    {% elif s.status == "success" %}{% set bar_class = "status-success" %}
+    {% else %}{% set bar_class = "in-flight" %}
+    {% endif %}
+    <div class="timeline-row" data-subtask-id="{{ s.subtask_id }}" data-task-id="{{ s.subtask_id }}">
+      <span class="timeline-label mono">{{ s.role }}[{{ s.cycle }}]</span>
+      <div class="timeline-bar-track">
+        <div
+          class="timeline-bar {{ bar_class }}"
+          style="width: {{ width_pct }}%"
+          title="{{ s.role }} | {{ s.cycle }} | provider={{ s.provider or '' }} | {{ s.status }} | {{ s.duration_s }}s | tokens_in={{ s.tokens_in if s.tokens_in is not none else '' }} | tokens_out={{ s.tokens_out if s.tokens_out is not none else '' }} | cost_usd={{ s.cost_usd }}"
+        ></div>
+      </div>
+      <span class="timeline-meta mono">{{ "%.1f"|format(s.duration_s) if s.duration_s is not none else "?" }}s</span>
+    </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="meta">No stage data yet.</p>
+{% endif %}
+
+<style>
+.timeline-container { padding: 10px 0; }
+.timeline-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.timeline-label { min-width: 220px; font-size: 12px; }
+.timeline-bar-track {
+  flex: 1;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  height: 24px;
+  overflow: hidden;
+}
+.timeline-bar {
+  height: 100%;
+  border-radius: 4px;
+  min-width: 4px;
+}
+.timeline-bar.status-success { background: #10b981; }
+.timeline-bar.status-failure { background: #ef4444; }
+.timeline-bar.status-amber { background: #f59e0b; }
+.timeline-bar.in-flight { background: #9ca3af; }
+.timeline-meta { font-size: 12px; min-width: 60px; color: var(--text-muted); }
+</style>
+{% endblock %}

@@ -23,6 +23,7 @@
           onsubmit="return confirm('Delete task {{ task_id }} from {{ column }}/? This cannot be undone.');">
       <button class="danger">Delete</button>
     </form>
+    <a href="/trace/{{ task_id }}"><button type="button" class="ghost">Trace</button></a>
     <a href="/"><button type="button" class="ghost">← Board</button></a>
   </div>
 </div>

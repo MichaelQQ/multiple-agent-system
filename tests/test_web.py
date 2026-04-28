@@ -6,6 +6,7 @@ and POST actions invoke the same board/daemon helpers the CLI uses.
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -408,3 +409,215 @@ def test_config_nav_has_config_link_to_roles_page(project: Path, client: TestCli
     r = client.get("/")
     assert r.status_code == 200
     assert 'href="/config/roles"' in r.text
+
+
+# ---------------------------------------------------------------------------
+# /trace/<task_id> tests — route and Trace link not yet implemented
+# ---------------------------------------------------------------------------
+
+
+def _make_trace_task(
+    mas: Path,
+    column: str,
+    task_id: str,
+    *,
+    role: str = "orchestrator",
+    goal: str = "trace goal",
+    parent_id: str | None = None,
+) -> Path:
+    tdir = board.task_dir(mas, column, task_id)
+    tdir.mkdir(parents=True)
+    board.write_task(tdir, Task(id=task_id, role=role, goal=goal, parent_id=parent_id))
+    return tdir
+
+
+def test_trace_done_task_renders_subtask_rows(project: Path, client: TestClient):
+    """GET /trace/<id>: 200 with a row per subtask + parent row; header shows id/role/goal/cost."""
+    mas = project / ".mas"
+    parent_id = "20260428-parent-aaaa"
+    task_id = "20260428-trace-done-bbbb"
+
+    tdir = _make_trace_task(mas, "done", task_id, parent_id=parent_id)
+
+    subtask_specs = [
+        ("20260428-impl-1111", "implementer"),
+        ("20260428-test-2222", "tester"),
+        ("20260428-eval-3333", "evaluator"),
+    ]
+    subs_root = tdir / "subtasks"
+    for sub_id, _role in subtask_specs:
+        sub_dir = subs_root / sub_id
+        sub_dir.mkdir(parents=True)
+        (sub_dir / "result.json").write_text(
+            Result(
+                task_id=sub_id,
+                status="success",
+                summary="ok",
+                verdict="pass",
+                tokens_in=100,
+                tokens_out=50,
+                cost_usd=0.01,
+                duration_s=10.0,
+            ).model_dump_json()
+        )
+
+    events = []
+    for i, (sub_id, sub_role) in enumerate(subtask_specs):
+        events.append({
+            "timestamp": f"2026-04-28T10:0{i}:00+00:00",
+            "event": "dispatch",
+            "role": sub_role,
+            "task_id": task_id,
+            "subtask_id": sub_id,
+            "provider": "claude-code",
+            "details": {"cycle": 0},
+        })
+        events.append({
+            "timestamp": f"2026-04-28T10:0{i + 1}:00+00:00",
+            "event": "completion",
+            "role": sub_role,
+            "task_id": task_id,
+            "subtask_id": sub_id,
+            "provider": "claude-code",
+            "status": "success",
+            "duration_s": 60.0,
+            "details": {"cycle": 0},
+        })
+    (tdir / "audit.jsonl").write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    (tdir / "transitions.jsonl").write_text(
+        "2026-04-28T10:00:00+00:00|proposed|doing|start\n"
+        "2026-04-28T10:10:00+00:00|doing|done|done\n"
+    )
+
+    r = client.get(f"/trace/{task_id}")
+    assert r.status_code == 200
+    body = r.text
+
+    # Header: task id, role, goal must be present
+    assert task_id in body
+    assert "orchestrator" in body
+    assert "trace goal" in body
+
+    # Each subtask has a row marker (data-task-id or data-subtask-id attribute)
+    for sub_id, _ in subtask_specs:
+        assert (
+            f'data-task-id="{sub_id}"' in body
+            or f'data-subtask-id="{sub_id}"' in body
+            or sub_id in body
+        )
+
+    # At least one row uses a data-task-id attribute (structural check)
+    assert "data-task-id" in body or "data-subtask-id" in body
+
+    # Tooltip must include provider name for completed stages (build_trace must populate stage["provider"])
+    assert "provider=claude-code" in body
+
+    # Tooltip must include non-empty tokens_in / tokens_out for completed stages
+    # (build_trace must read tokens_in/tokens_out from result.json per stage)
+    assert "tokens_in=100" in body
+    assert "tokens_out=50" in body
+
+
+def test_trace_failed_task_shows_failure_class(project: Path, client: TestClient):
+    """GET /trace/<id> for failed/ task: last subtask with status=failure gets failure CSS class."""
+    mas = project / ".mas"
+    task_id = "20260428-trace-fail-cccc"
+
+    tdir = _make_trace_task(mas, "failed", task_id)
+
+    sub_id = "20260428-eval-fail-1234"
+    sub_dir = tdir / "subtasks" / sub_id
+    sub_dir.mkdir(parents=True)
+    (sub_dir / "result.json").write_text(
+        Result(task_id=sub_id, status="failure", summary="failed hard", duration_s=5.0).model_dump_json()
+    )
+
+    events = [
+        {
+            "timestamp": "2026-04-28T11:00:00+00:00",
+            "event": "dispatch",
+            "role": "evaluator",
+            "task_id": task_id,
+            "subtask_id": sub_id,
+            "details": {"cycle": 0},
+        },
+        {
+            "timestamp": "2026-04-28T11:01:00+00:00",
+            "event": "completion",
+            "role": "evaluator",
+            "task_id": task_id,
+            "subtask_id": sub_id,
+            "status": "failure",
+            "duration_s": 60.0,
+            "details": {"cycle": 0},
+        },
+    ]
+    (tdir / "audit.jsonl").write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    (tdir / "transitions.jsonl").write_text(
+        "2026-04-28T11:00:00+00:00|proposed|doing|start\n"
+        "2026-04-28T11:05:00+00:00|doing|failed|failed\n"
+    )
+
+    r = client.get(f"/trace/{task_id}")
+    assert r.status_code == 200
+    body = r.text
+
+    # The failure stage bar must carry a failure CSS class
+    assert "status-failure" in body or "failure" in body
+
+
+def test_trace_in_flight_subtask_shows_in_flight_class(project: Path, client: TestClient):
+    """GET /trace/<id>: dispatch-without-completion subtask renders in-flight CSS class."""
+    mas = project / ".mas"
+    task_id = "20260428-trace-flight-dddd"
+
+    tdir = _make_trace_task(mas, "doing", task_id)
+
+    sub_id = "20260428-impl-inflight-5678"
+    sub_dir = tdir / "subtasks" / sub_id
+    sub_dir.mkdir(parents=True)
+    # PID file present; no result.json written yet
+    pids_dir = tdir / "pids"
+    pids_dir.mkdir(parents=True)
+    (pids_dir / "implementer.claude-code.pid").write_text("12345")
+
+    events = [
+        {
+            "timestamp": "2026-04-28T12:00:00+00:00",
+            "event": "dispatch",
+            "role": "implementer",
+            "task_id": task_id,
+            "subtask_id": sub_id,
+            "details": {"cycle": 0},
+        },
+    ]
+    (tdir / "audit.jsonl").write_text(json.dumps(events[0]) + "\n")
+    (tdir / "transitions.jsonl").write_text(
+        "2026-04-28T12:00:00+00:00|proposed|doing|start\n"
+    )
+
+    r = client.get(f"/trace/{task_id}")
+    assert r.status_code == 200
+    body = r.text
+
+    # The in-flight stage must carry an in-flight CSS class
+    assert "in-flight" in body or "status-in-flight" in body
+
+
+def test_trace_unknown_task_returns_404(project: Path, client: TestClient):
+    """GET /trace/<id> for a non-existent task returns 404 with the task id in the body."""
+    r = client.get("/trace/does-not-exist-0000")
+    assert r.status_code == 404
+    # Generic FastAPI 404 only says {"detail":"Not Found"} — the real route must include the id
+    assert "does-not-exist-0000" in r.text
+
+
+def test_task_detail_page_has_trace_link(project: Path, client: TestClient):
+    """The per-task detail page (/task/<id>) must contain a link to /trace/<id>."""
+    mas = project / ".mas"
+    task_id = "20260428-tracelink-ffff"
+    _put_task(mas, "doing", task_id, role="implementer", goal="check trace link")
+
+    r = client.get(f"/task/{task_id}")
+    assert r.status_code == 200
+    assert f'href="/trace/{task_id}"' in r.text

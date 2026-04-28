@@ -1044,7 +1044,9 @@ def trace(
     stages = trace_data["stages"]
 
     if json_out:
-        typer.echo(json.dumps(trace_data))
+        _CLI_KEYS = {"subtask_id", "role", "cycle", "started_at", "ended_at", "duration_s", "status", "cost_usd"}
+        cli_data = {**trace_data, "stages": [{k: v for k, v in s.items() if k in _CLI_KEYS} for s in stages]}
+        typer.echo(json.dumps(cli_data))
         return
 
     if not stages:
