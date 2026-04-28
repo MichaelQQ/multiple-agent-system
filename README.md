@@ -311,12 +311,13 @@ mas web --host 127.0.0.1 --port 8765
 
 The local UI shows the board, task details, recent audit events, cost totals,
 and log tails. Tasks within each column are sorted by most recent transition
-(newest first). The header navigation exposes four pages:
+(newest first). The header navigation exposes five pages:
 
 | Page        | Route       | Purpose                                                           |
 |-------------|-------------|-------------------------------------------------------------------|
 | Board       | `/`         | Kanban view; run tick, start/stop daemon, prune, upgrade          |
 | Events      | `/events`   | Cross-task audit feed with `task/role/status/event/limit` filters |
+| Stats       | `/stats`    | Aggregate board counts, token usage, and cost totals; accepts `?since=<window>` (e.g. `1h`, `7d`) to filter by recency |
 | Validate    | `/validate` | Runs `validate_environment` and shows providers/roles summary     |
 | Cron        | `/cron`     | Inspect, install, and uninstall the per-project cron entry        |
 

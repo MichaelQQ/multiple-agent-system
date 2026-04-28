@@ -20,6 +20,7 @@ from .. import board, cron, daemon, transitions, worktree
 from ..audit import read_events
 from ..config import load_config, project_dir, project_root, validate_environment
 from ..events import read_board_events
+from ..stats import compute_stats, parse_since
 
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
 
@@ -469,6 +470,28 @@ def create_app(project: Path | None = None) -> FastAPI:
     def upgrade():
         pid = _spawn_detached(proj, ["upgrade", "--yes"], "web-upgrade.log")
         return RedirectResponse(f"/?upgrade_pid={pid}", status_code=303)
+
+    @app.get("/stats", response_class=HTMLResponse)
+    def stats_view(request: Request, since: str | None = None):
+        error = None
+        since_param: str | None = since
+        if since:
+            try:
+                parse_since(since)
+            except ValueError as e:
+                error = str(e)
+                since_param = None
+        stats = compute_stats(mas, since=since_param)
+        return templates.TemplateResponse(
+            request,
+            "stats.html",
+            {
+                "stats": stats,
+                "since": since or "",
+                "error": error,
+                "project": str(proj),
+            },
+        )
 
     @app.get("/daemon/status")
     def daemon_status_endpoint():
