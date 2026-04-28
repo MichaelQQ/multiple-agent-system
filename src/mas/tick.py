@@ -33,6 +33,7 @@ class TickEnv(BaseModel):
     repo: Path
     mas: Path
     cfg: MasConfig
+    paused: bool = False
 
 
 def _acquire_lock(mas_dir: Path):
@@ -65,7 +66,8 @@ def run_tick(*, start: Path | None = None, cfg: "MasConfig" | None = None) -> No
         log.error("validation failed: %s", issue_msgs)
         raise ValueError(f"Validation failed: {issue_msgs}")
 
-    env = TickEnv(repo=repo, mas=mas, cfg=cfg)
+    paused = (mas / "PAUSED").exists()
+    env = TickEnv(repo=repo, mas=mas, cfg=cfg, paused=paused)
     board.ensure_layout(mas)
 
     try:
@@ -77,7 +79,10 @@ def run_tick(*, start: Path | None = None, cfg: "MasConfig" | None = None) -> No
     try:
         _reap_workers(env)
         _advance_doing(env)
-        _maybe_dispatch_proposer(env)
+        if paused:
+            log.info("paused (.mas/PAUSED present), skipping dispatch")
+        else:
+            _maybe_dispatch_proposer(env)
     finally:
         lock.close()
 
@@ -199,7 +204,7 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
             return
         # Never dispatched (no log file, no result) — dispatch now.
         log_path = parent_dir / "logs" / f"proposer-{parent_task.attempt}.log"
-        if not log_path.exists():
+        if not log_path.exists() and not env.paused:
             _dispatch_role(env, parent_task, parent_dir, parent_dir, role="proposer")
         return
 
@@ -223,7 +228,8 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
             _retry_or_fail_orchestrator(env, parent_dir, parent_task, orch_attempt)
             return
         parent_task.attempt = orch_attempt
-        _dispatch_role(env, parent_task, parent_dir, wt, role="orchestrator")
+        if not env.paused:
+            _dispatch_role(env, parent_task, parent_dir, wt, role="orchestrator")
         return
 
     plan = parse_plan(plan_path, parent_task.id)
@@ -279,6 +285,9 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
         if next_child.role == "evaluator":
             result = _verify.verify_evaluator_result(next_child, result, wt)
         _handle_child_result(env, parent_dir, parent_task, plan, next_child, result)
+        return
+
+    if env.paused:
         return
 
     child_task = Task(

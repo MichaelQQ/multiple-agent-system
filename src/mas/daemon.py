@@ -20,6 +20,32 @@ PID_FILENAME = "daemon.pid"
 INTERVAL_FILENAME = "daemon.interval"
 LOG_FILENAME = "logs/daemon.log"
 DEFAULT_INTERVAL_SECONDS = 300
+PAUSED_FILENAME = "PAUSED"
+
+
+def _paused_path(mas: Path) -> Path:
+    return mas / PAUSED_FILENAME
+
+
+def pause(project: Path) -> None:
+    """Create .mas/PAUSED to suspend dispatch. Idempotent."""
+    from .config import project_dir
+    mas = project_dir(project)
+    _paused_path(mas).touch()
+
+
+def resume(project: Path) -> None:
+    """Remove .mas/PAUSED to resume dispatch. Idempotent."""
+    from .config import project_dir
+    mas = project_dir(project)
+    _paused_path(mas).unlink(missing_ok=True)
+
+
+def is_paused(project: Path) -> bool:
+    """Return True if .mas/PAUSED exists."""
+    from .config import project_dir
+    mas = project_dir(project)
+    return _paused_path(mas).exists()
 
 
 def _stamp() -> str:

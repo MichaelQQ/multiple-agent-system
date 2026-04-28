@@ -406,13 +406,36 @@ reused.
 mas daemon start              # fork detached process, tick every 300 s
 mas daemon start --interval 60
 mas daemon start --json-logs  # write daemon.log in newline-delimited JSON
-mas daemon status
+mas daemon status             # show PID, running state, and paused state
 mas daemon stop
+mas daemon pause              # suspend new dispatch without stopping the daemon
+mas daemon resume             # lift the pause and resume normal dispatch
 ```
 
 The daemon writes its PID to `.mas/daemon.pid`, its configured interval to
 `.mas/daemon.interval`, and logs to `.mas/logs/daemon.log`. Only one daemon
 may run per project; starting a second raises an error.
+
+#### Pausing and resuming the daemon
+
+`mas daemon pause` creates a `.mas/PAUSED` marker file. On each subsequent
+tick the daemon still runs the reaper (collecting results from workers that
+finished) and advances tasks that have a `result.json` waiting (in-flight
+drain), but no new workers are dispatched and the proposer is not called.
+This lets you halt new work without aborting tasks already in flight.
+
+`mas daemon resume` removes `.mas/PAUSED`, restoring normal dispatch on the
+next tick.
+
+`mas daemon status` always reports the paused state:
+
+```
+daemon running (pid 12345)
+paused: yes
+```
+
+The `.mas/PAUSED` file can also be created or removed manually if the daemon
+is not running — the tick loop and `mas tick` honour the same marker.
 
 #### `--json-logs` flag
 

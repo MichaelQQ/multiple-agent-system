@@ -992,6 +992,21 @@ def daemon_status() -> None:
         typer.echo(f"daemon running (pid {pid})")
     else:
         typer.echo(f"stale pid file (pid {pid} not alive)")
+    typer.echo(f"paused: {'yes' if daemon.is_paused(project_root()) else 'no'}")
+
+
+@daemon_app.command("pause")
+def daemon_pause() -> None:
+    """Pause dispatch without stopping the daemon."""
+    daemon.pause(project_root())
+    typer.echo("paused")
+
+
+@daemon_app.command("resume")
+def daemon_resume() -> None:
+    """Resume dispatch."""
+    daemon.resume(project_root())
+    typer.echo("resumed")
 
 
 @app.command()
