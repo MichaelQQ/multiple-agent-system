@@ -969,9 +969,10 @@ def config_show(
 @daemon_app.command("start")
 def daemon_start(
     interval: int = typer.Option(300, "--interval", help="Seconds between ticks"),
+    json_logs: bool = typer.Option(False, "--json-logs", help="Emit structured JSON logs to daemon.log"),
 ) -> None:
     proj = project_root()
-    pid = daemon.start(proj, interval_seconds=interval)
+    pid = daemon.start(proj, interval_seconds=interval, json_logs=json_logs)
     typer.echo(f"daemon started (pid {pid}, interval {interval}s)")
 
 

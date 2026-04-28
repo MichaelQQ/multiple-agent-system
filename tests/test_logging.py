@@ -68,9 +68,9 @@ class TestJsonFormatter:
 
         output = log_file.read_text().strip()
         parsed = json.loads(output)
-        assert "timestamp" in parsed
+        assert "ts" in parsed
         assert "level" in parsed
-        assert parsed["level"] == "INFO"
+        assert parsed["level"] == "info"
         assert "logger" in parsed
         assert parsed["logger"] == "mas.test_fields"
         assert "message" in parsed

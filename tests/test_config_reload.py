@@ -224,6 +224,14 @@ class TestDaemonLoopConfigReload:
                             mock_reload.assert_called()
                             call_args = [c for c in mock_log.info.call_args_list]
                             reload_log = next(
-                                (c for c in call_args if c[0][0] == "config reloaded"), None
+                                (c for c in call_args if c[0][0] == "config_reloaded"), None
                             )
-                            assert reload_log is not None
+                            assert reload_log is not None, (
+                                f"log.info('config_reloaded', ...) not found; calls: {[c[0][0] for c in call_args]}"
+                            )
+                            extra = reload_log[1].get("extra", {})
+                            assert extra.get("event") == "config_reloaded"
+                            assert isinstance(extra.get("changes"), list)
+                            for change in extra.get("changes", []):
+                                assert isinstance(change, dict)
+                                assert "field" in change and "old" in change and "new" in change

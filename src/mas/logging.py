@@ -13,9 +13,12 @@ class JsonFormatter(logging.Formatter):
         super().__init__()
 
     def format(self, record: logging.LogRecord) -> str:
+        level = record.levelname.lower()
+        if level == "warning":
+            level = "warn"
         msg: dict[str, Any] = {
-            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
-            "level": record.levelname,
+            "ts": datetime.fromtimestamp(record.created, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "level": level,
             "logger": record.name,
             "message": record.getMessage(),
         }
@@ -64,7 +67,9 @@ def get_task_logger(logger: logging.Logger, task_id: str | None = None, componen
     return TaskLogger(logger, {"task_id": task_id, "component": component})
 
 
-def setup_daemon_logging(log_dir: Path, max_bytes: int, backup_count: int) -> logging.handlers.RotatingFileHandler:
+def setup_daemon_logging(
+    log_dir: Path, max_bytes: int, backup_count: int, json_logs: bool = False
+) -> logging.handlers.RotatingFileHandler:
     """Install a RotatingFileHandler at `log_dir/daemon.log` on the `mas` logger.
 
     Removes any pre-existing RotatingFileHandler on the `mas` logger so repeated
@@ -86,7 +91,10 @@ def setup_daemon_logging(log_dir: Path, max_bytes: int, backup_count: int) -> lo
     handler = logging.handlers.RotatingFileHandler(
         str(log_file), maxBytes=max_bytes, backupCount=backup_count
     )
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    if json_logs:
+        handler.setFormatter(JsonFormatter())
+    else:
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
     root.addHandler(handler)
     if root.level == logging.NOTSET:
         root.setLevel(logging.INFO)

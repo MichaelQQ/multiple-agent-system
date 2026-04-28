@@ -81,7 +81,7 @@ def _clear_pid(mas: Path) -> None:
     _interval_path(mas).unlink(missing_ok=True)
 
 
-def start(project: Path, interval_seconds: int = 300) -> int:
+def start(project: Path, interval_seconds: int = 300, json_logs: bool = False) -> int:
     """Fork a detached daemon that runs tick every interval_seconds.
 
     Returns the daemon PID. Raises DaemonError if one is already running.
@@ -126,7 +126,12 @@ def start(project: Path, interval_seconds: int = 300) -> int:
     os.umask(0o022)
 
     from .logging import setup_daemon_logging
-    setup_daemon_logging(mas / "logs", cfg.daemon.log_max_bytes, cfg.daemon.log_backup_count)
+    setup_daemon_logging(
+        mas / "logs", 
+        cfg.daemon.log_max_bytes, 
+        cfg.daemon.log_backup_count,
+        json_logs=json_logs
+    )
 
     devnull_r = open(os.devnull, "rb")
     devnull_w = open(os.devnull, "ab")
@@ -145,14 +150,12 @@ def start(project: Path, interval_seconds: int = 300) -> int:
     signal.signal(signal.SIGTERM, _handle_term)
     signal.signal(signal.SIGINT, _handle_term)
 
-    _say(
-        f"daemon started (pid={os.getpid()}, interval={interval_seconds}s, project={project})"
-    )
+    _log_daemon_start(pid=os.getpid(), interval_s=interval_seconds)
 
     try:
         _run_loop(project, interval_seconds, stop_flag)
     finally:
-        _say("daemon stopped")
+        _log_daemon_stop(reason="signal")
         _clear_pid(mas)
         os._exit(0)
 
@@ -177,23 +180,18 @@ def _run_loop(project: Path, interval_seconds: int, stop_flag: dict) -> None:
             new_config, changes = _check_reload_config(project, current_config)
             if new_config is not current_config:
                 if changes:
-                    summary = ", ".join(f"{c[0]}: {c[1]}->{c[2]}" for c in changes)
-                    log.info("config reloaded", summary=summary)
+                    _log_config_reloaded(changes)
                 current_config = new_config
             watcher.mark_checked()
 
-        _say(f"tick #{tick_num} start")
+        log.info("tick_start", extra={"event": "tick_start", "tick_num": tick_num})
         try:
             run_tick(start=project, cfg=current_config)
             elapsed = time.time() - started
-            _say(f"tick #{tick_num} done in {elapsed:.2f}s")
+            log.info("tick_done", extra={"event": "tick_done", "tick_num": tick_num, "duration_s": elapsed})
         except Exception as exc:
             elapsed = time.time() - started
-            _say(
-                f"tick #{tick_num} failed in {elapsed:.2f}s: "
-                f"{type(exc).__name__}: {exc}"
-            )
-            log.exception("tick failed")
+            log.error("tick_error", extra={"event": "tick_error", "tick_num": tick_num, "error": str(exc)})
 
         remaining = interval_seconds
         while remaining > 0 and not stop_flag["stop"]:
@@ -244,6 +242,19 @@ def status(project: Path) -> tuple[int | None, bool]:
     if pid is None:
         return None, False
     return pid, _pid_alive(pid)
+
+
+def _log_daemon_start(pid: int, interval_s: int) -> None:
+    log.info("daemon_start", extra={"event": "daemon_start", "pid": pid, "interval_s": interval_s})
+
+
+def _log_daemon_stop(reason: str) -> None:
+    log.info("daemon_stop", extra={"event": "daemon_stop", "reason": reason})
+
+
+def _log_config_reloaded(changes: list) -> None:
+    change_dicts = [{"field": c[0], "old": c[1], "new": c[2]} for c in changes]
+    log.info("config_reloaded", extra={"event": "config_reloaded", "changes": change_dicts})
 
 
 def _check_reload_config(project: Path, previous_config: "MasConfig") -> tuple["MasConfig", list[tuple[str, str, str]]]:

@@ -278,7 +278,13 @@ class TestRunLoop:
                     stop_flag["stop"] = True
                 with patch("mas.daemon.time.sleep", side_effect=fake_sleep):
                     _run_loop(mas.parent, 1, stop_flag)
-                    mock_log.exception.assert_called_once()
+                    error_calls = mock_log.error.call_args_list
+                    tick_error_call = next(
+                        (c for c in error_calls if c[1].get("extra", {}).get("event") == "tick_error"),
+                        None,
+                    )
+                    assert tick_error_call is not None, "log.error with event=tick_error was not called"
+                    assert "tick failed" in tick_error_call[1].get("extra", {}).get("error", "")
 
     def test_run_loop_sleeps_in_slices(self, mas):
         stop_flag = {"stop": False}

@@ -317,6 +317,7 @@ reused.
 ```sh
 mas daemon start              # fork detached process, tick every 300 s
 mas daemon start --interval 60
+mas daemon start --json-logs  # write daemon.log in newline-delimited JSON
 mas daemon status
 mas daemon stop
 ```
@@ -324,6 +325,39 @@ mas daemon stop
 The daemon writes its PID to `.mas/daemon.pid`, its configured interval to
 `.mas/daemon.interval`, and logs to `.mas/logs/daemon.log`. Only one daemon
 may run per project; starting a second raises an error.
+
+#### `--json-logs` flag
+
+Pass `--json-logs` to switch `.mas/logs/daemon.log` from plain text to
+newline-delimited JSON (one JSON object per line). Every record contains at
+least these three stable keys:
+
+| Key     | Type   | Description                                         |
+|---------|--------|-----------------------------------------------------|
+| `ts`    | string | UTC timestamp in ISO-8601 format ending with `Z`    |
+| `level` | string | Log level in lowercase: `info`, `warn`, or `error`  |
+| `event` | string | Machine-readable event name (see below)             |
+
+Event-specific context fields are included alongside the stable keys. Common
+events and their extra fields:
+
+| `event`           | Extra fields                          |
+|-------------------|---------------------------------------|
+| `daemon_start`    | `pid` (int), `interval_s` (int)       |
+| `daemon_stop`     | `reason` (string)                     |
+| `tick_start`      | `tick_num` (int)                      |
+| `tick_done`       | `tick_num` (int), `duration_s` (float)|
+| `tick_error`      | `tick_num` (int), `error` (string)    |
+| `config_reloaded` | `changes` (list of `{field, old, new}` dicts) |
+
+Example `tick_done` record:
+
+```json
+{"ts": "2026-04-27T08:00:05Z", "level": "info", "event": "tick_done", "tick_num": 42, "duration_s": 1.23}
+```
+
+Log rotation settings (`log_max_bytes`, `log_backup_count`) apply regardless
+of whether `--json-logs` is used.
 
 **Config hot-reload:** The daemon automatically detects changes to `.mas/config.yaml`
 and `.mas/roles.yaml` without requiring a restart. Before each tick cycle, it checks
