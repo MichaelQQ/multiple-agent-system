@@ -70,6 +70,10 @@ mas doctor                    # diagnose environment: config, providers, board, 
 mas config show               # print fully-resolved config (YAML by default)
 mas config show --json        # emit as JSON
 mas config show --field daemon.log_max_bytes   # print a single field value
+mas pr      <id>              # open a GitHub PR for a done task
+mas pr      <id> --draft      # open as a draft PR
+mas pr      <id> --base main  # override target branch
+mas pr      <id> --reviewer handle  # request a reviewer (repeatable)
 ```
 
 ### Config inspection
@@ -259,7 +263,28 @@ mas doctor --strict           # treat WARN as failure (exit 1 if any WARNs)
    `max_proposed`. You review cards there and run `mas promote <id>` to move
    approved ones to `doing/`.
 2. **PR.** When a task lands in `done/`, its branch `mas/<id>` is preserved
-   (worktree pruned). You open the PR yourself with `gh pr create`.
+   (worktree pruned). Run `mas pr <id>` to open the PR via `gh`.
+
+## Opening PRs
+
+`mas pr <task-id>` opens a GitHub pull request for a completed task using the `gh` CLI.
+
+```sh
+mas pr 20260424-my-task-ab12              # open PR (title from result summary, body from goal)
+mas pr 20260424-my-task-ab12 --draft      # mark as draft
+mas pr 20260424-my-task-ab12 --base main  # override target branch (default: repo default branch)
+mas pr 20260424-my-task-ab12 --reviewer handle  # request a reviewer (flag is repeatable)
+```
+
+Flags:
+
+| Flag | Description |
+|---|---|
+| `--draft` | Mark the PR as a draft |
+| `--base <branch>` | Target branch (default: repo default branch via `gh repo view`) |
+| `--reviewer <handle>` | Request a reviewer; repeatable for multiple reviewers |
+
+The command requires `gh` to be installed and authenticated (`gh auth login`). It looks up the task in the `done/` column, reads `result.json` for the summary, and uses the task goal as the PR body. The branch `mas/<task-id>` is pushed to origin if it is not already there (no force-push). If `gh pr create` reports that a PR already exists, the existing PR URL is printed and the command exits 0.
 
 ## Cost tracking
 
@@ -587,6 +612,6 @@ See `tests/e2e/scripts/` for examples of role scripts.
 
 Implemented: `init`, `upgrade`, `validate`, `tick`, `show`, `promote`,
 `retry`, `delete`, `logs`, `tail`, `audit`, `cost`, `stats`, `prune`,
-`cron`, `daemon`, `doctor`, and the optional `web` UI. Out of scope (v2):
-`mas pr`, `mas kill`, launchd, parallel child execution,
+`cron`, `daemon`, `doctor`, `pr`, and the optional `web` UI. Out of scope (v2):
+`mas kill`, launchd, parallel child execution,
 auto-PR/merge.
