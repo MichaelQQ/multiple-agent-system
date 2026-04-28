@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -621,3 +622,143 @@ def test_task_detail_page_has_trace_link(project: Path, client: TestClient):
     r = client.get(f"/task/{task_id}")
     assert r.status_code == 200
     assert f'href="/trace/{task_id}"' in r.text
+
+
+# ---------------------------------------------------------------------------
+# Stats page (Acceptances #4, #5, #6)
+# ---------------------------------------------------------------------------
+
+def _put_task_with_result(
+    mas: Path,
+    column: str,
+    task_id: str,
+    role: str = "implementer",
+    goal: str = "do a thing",
+    cost_usd: float = 0.25,
+    tokens_in: int = 100,
+    tokens_out: int = 50,
+    provider: str | None = None,
+    duration_s: float | None = None,
+    environment_error: bool = False,
+) -> Path:
+    inputs: dict = {}
+    if provider is not None:
+        inputs["provider"] = provider
+    tdir = board.task_dir(mas, column, task_id)
+    tdir.mkdir(parents=True)
+    board.write_task(tdir, Task(id=task_id, role=role, goal=goal, inputs=inputs))
+    if environment_error:
+        status = "environment_error"
+    elif column == "done":
+        status = "success"
+    else:
+        status = "failure"
+    result = Result(
+        task_id=task_id,
+        status=status,
+        summary=f"result for {task_id}",
+        tokens_in=tokens_in,
+        tokens_out=tokens_out,
+        cost_usd=cost_usd,
+        duration_s=duration_s,
+    )
+    (tdir / "result.json").write_text(result.model_dump_json())
+    return tdir
+
+
+class TestStatsPage:
+    def test_stats_page_renders_board_counts_and_total_cost(
+        self, project: Path, client: TestClient
+    ):
+        """GET /stats returns 200 with per-column task counts and total cost_usd."""
+        mas = project / ".mas"
+        _put_task_with_result(
+            mas, "done", "20260427-stdone-aa00",
+            goal="done work", cost_usd=0.25, tokens_in=100, tokens_out=50,
+        )
+        _put_task_with_result(
+            mas, "failed", "20260427-stfail-bb00",
+            role="evaluator", goal="failed work", cost_usd=0.25, tokens_in=200, tokens_out=100,
+        )
+
+        r = client.get("/stats")
+        assert r.status_code == 200
+        body = r.text
+        # Per-column counts: board has 1 done and 1 failed
+        assert "done" in body.lower()
+        assert "failed" in body.lower()
+        # Total cost_usd = 0.25 + 0.25 = 0.50; assert formatted value present
+        assert "0.50" in body
+
+    def test_stats_page_since_1h_returns_200(
+        self, project: Path, client: TestClient
+    ):
+        """GET /stats?since=1h returns 200."""
+        r = client.get("/stats?since=1h")
+        assert r.status_code == 200
+
+    def test_stats_page_since_garbage_returns_200_with_error_banner(
+        self, project: Path, client: TestClient
+    ):
+        """GET /stats?since=garbage returns 200 with a visible error banner."""
+        r = client.get("/stats?since=garbage")
+        assert r.status_code == 200
+        assert "Invalid since" in r.text
+
+    def test_nav_has_stats_link(self, project: Path, client: TestClient):
+        """The board (index) page nav contains a link to /stats with text 'Stats'."""
+        r = client.get("/")
+        assert r.status_code == 200
+        body = r.text
+        assert 'href="/stats"' in body
+        assert "Stats" in body
+
+    def test_stats_page_renders_all_metric_sections(
+        self, project: Path, client: TestClient
+    ):
+        """GET /stats renders Outcome Rates, Role Durations, Provider Activity,
+        and Environment Errors sections with real data from compute_stats()."""
+        mas = project / ".mas"
+        # done task: implementer role, claude_code provider, 10s duration
+        _put_task_with_result(
+            mas, "done", "20260427-stall-aaaa",
+            role="implementer", goal="implement",
+            cost_usd=0.10, tokens_in=100, tokens_out=50,
+            provider="claude_code", duration_s=10.0,
+        )
+        # failed task: evaluator role, codex provider, 5s duration, environment_error
+        _put_task_with_result(
+            mas, "failed", "20260427-stall-bbbb",
+            role="evaluator", goal="evaluate",
+            cost_usd=0.05, tokens_in=50, tokens_out=20,
+            provider="codex", duration_s=5.0,
+            environment_error=True,
+        )
+
+        r = client.get("/stats")
+        assert r.status_code == 200
+        body = r.text
+
+        # Section headings (h2) for the four missing metric groups
+        assert "Outcome Rates" in body or "outcome" in body.lower(), \
+            "Expected an Outcome Rates section heading"
+        assert "Role" in body and ("Duration" in body or "duration" in body.lower()), \
+            "Expected a Role Durations section heading"
+        assert "Provider" in body, \
+            "Expected a Provider Activity section heading"
+        assert "Environment Error" in body or "env_error" in body.lower(), \
+            "Expected an Environment Errors section heading"
+
+        # Per-role row: implementer with timing data
+        assert "implementer" in body, "Expected implementer role row"
+        # Per-provider row
+        assert "claude_code" in body or "codex" in body, \
+            "Expected at least one provider row"
+        # env_errors is 1 (the environment_error task) — anchored to the section
+        assert re.search(r"Environment Error[s]?[\s\S]{0,300}1", body), \
+            "Expected env_errors=1 rendered under the Environment Errors section"
+
+        # Outcome rates formatted as percentages
+        # success_rate = 1/2 = 50%, revision_rate = 0%
+        assert "50.0%" in body or "50%" in body, \
+            "Expected 50% success rate rendered as a percentage"

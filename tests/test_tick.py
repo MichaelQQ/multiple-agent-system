@@ -1618,7 +1618,7 @@ def test_cost_budget_no_budget_dispatches_normally(tmp_path: Path):
     )
     env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg())
 
-    with patch("mas.tick._dispatch_role") as mock_dispatch:
+    with patch("mas.tick._dispatch_role", return_value=12345) as mock_dispatch:
         _advance_one(env, parent)
 
     mock_dispatch.assert_called_once()
@@ -1641,7 +1641,7 @@ def test_cost_budget_under_budget_dispatches_normally(tmp_path: Path):
     env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg())
 
     with patch("mas.board.read_task", return_value=parent_task), \
-         patch("mas.tick._dispatch_role") as mock_dispatch:
+         patch("mas.tick._dispatch_role", return_value=12345) as mock_dispatch:
         _advance_one(env, parent)
 
     mock_dispatch.assert_called_once()

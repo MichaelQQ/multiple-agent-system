@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+
+{% block title %}Stats - mas{% endblock %}
+
+{% block content %}
+<h1>Stats</h1>
+
+{% if error %}
+<div class="flash" style="background: #fef2f2; border-color: #fecaca; color: #b91c1c;">
+  <strong>Invalid since:</strong> {{ error }}
+</div>
+{% endif %}
+
+<div class="actions">
+  <form method="get">
+    <label for="since">Since:</label>
+    <input type="text" id="since" name="since" placeholder="e.g., 1h, 1d, 1w" value="{{ since }}" style="width: 100px;">
+    <button type="submit">Filter</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Board Summary</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Column</th>
+        <th>Count</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for col in ["proposed", "doing", "done", "failed"] %}
+      <tr>
+        <td><span class="pill pill-{{ col }}">{{ col }}</span></td>
+        <td>{{ stats.board.get(col, 0) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>Cost Summary</h2>
+  <table>
+    <tbody>
+      <tr>
+        <th style="text-align: left; font-weight: normal;">Total Cost</th>
+        <td><strong>${{ "%.2f"|format(stats.tokens.cost_usd) }}</strong></td>
+      </tr>
+      <tr>
+        <th style="text-align: left; font-weight: normal;">Tokens In</th>
+        <td>{{ stats.tokens.tokens_in }}</td>
+      </tr>
+      <tr>
+        <th style="text-align: left; font-weight: normal;">Tokens Out</th>
+        <td>{{ stats.tokens.tokens_out }}</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>Outcome Rates</h2>
+  <table>
+    <tbody>
+      <tr>
+        <th style="text-align: left; font-weight: normal;">Success Rate</th>
+        <td>{{ "%.1f"|format(stats.success_rate * 100) }}%</td>
+      </tr>
+      <tr>
+        <th style="text-align: left; font-weight: normal;">Revision Rate</th>
+        <td>{{ "%.1f"|format(stats.revision_rate * 100) }}%</td>
+      </tr>
+      <tr>
+        <th style="text-align: left; font-weight: normal;">Failure Rate</th>
+        <td>{{ "%.1f"|format((1 - stats.success_rate - stats.revision_rate) * 100) }}%</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>Role Durations</h2>
+  {% if stats.roles %}
+  <table>
+    <thead>
+      <tr>
+        <th>Role</th>
+        <th>Count</th>
+        <th>Mean (s)</th>
+        <th>p50 (s)</th>
+        <th>p95 (s)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for role, data in stats.roles.items() %}
+      <tr>
+        <td>{{ role }}</td>
+        <td>{{ data.count }}</td>
+        <td>{{ "%.1f"|format(data.mean_s) if data.mean_s is not none else "—" }}</td>
+        <td>{{ "%.1f"|format(data.p50_s) if data.p50_s is not none else "—" }}</td>
+        <td>{{ "%.1f"|format(data.p95_s) if data.p95_s is not none else "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>No role duration data.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Provider Activity</h2>
+  {% if stats.providers %}
+  <table>
+    <thead>
+      <tr>
+        <th>Provider</th>
+        <th>Tasks</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for provider, count in stats.providers.items() %}
+      <tr>
+        <td>{{ provider }}</td>
+        <td>{{ count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>No provider data.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Environment Errors</h2>
+  <p>{{ stats.env_errors }}</p>
+</div>
+
+{% endblock %}
