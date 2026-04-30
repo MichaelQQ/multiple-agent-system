@@ -84,7 +84,7 @@ Effort: S (trace) + M (patterns).
 ## TODO (suggested execution order — high impact, low risk first)
 
 - [x] **1.** Fix `_append_revision_cycle` exhausted-cycles bug → move parent to `failed/` with `revision_cycles_exhausted` reason (gap 4, ~30min, scoped in `ideas.md`)
-- [ ] **2.** Typed handoff schemas: replace `Result.handoff: dict[str, Any]` with role-specific Pydantic models (gap 1)
+- [x] **2.** Typed handoff schemas: replace `Result.handoff: dict[str, Any]` with role-specific Pydantic models (gap 1)
 - [ ] **3.** Headless test re-run verifier in tick before accepting implementer success (gap 1)
 - [ ] **4.** `compress_prior_results` truncation helper, applied when serialized size > 8KB (gap 6)
 - [ ] **5.** Retrieval slice for `prior_results` — filter by current role + filename regex (gap 6)

@@ -30,7 +30,9 @@ import re
 import shlex
 from pathlib import Path
 
-from .schemas import Result, SubtaskSpec
+from pydantic import ValidationError
+
+from .schemas import ImplementerHandoff, Result, SubtaskSpec, TesterHandoff
 
 _SANDBOX_MARKERS = (
     "blocked by the sandbox",
@@ -103,27 +105,31 @@ def verify_child_result(
     if _is_docs_only(spec):
         return result
 
-    handoff = result.handoff or {}
+    typed_handoff: TesterHandoff | ImplementerHandoff | None = None
+    raw = result.handoff or {}
 
     if spec.role == "tester":
-        test_cmd = handoff.get("test_command")
-        init_code = handoff.get("initial_exit_code")
-        missing: list[str] = []
-        if not test_cmd or not isinstance(test_cmd, str):
-            missing.append("test_command")
-        if not isinstance(init_code, int):
-            missing.append("initial_exit_code")
-        if missing:
-            return _coerce(result, f"tester handoff missing or invalid: {', '.join(missing)}")
-        if init_code == 0:
+        try:
+            typed_handoff = TesterHandoff.model_validate(raw)
+        except ValidationError as e:
+            fields = _invalid_fields(e)
+            return _coerce(result, f"tester handoff missing or invalid: {', '.join(fields)}")
+        if not typed_handoff.test_command:
+            return _coerce(result, "tester handoff missing or invalid: test_command")
+        if typed_handoff.initial_exit_code == 0:
             return _coerce(result, "tester handoff.initial_exit_code is 0 — tests are not failing")
 
     if spec.role == "implementer":
-        final_code = handoff.get("final_exit_code")
-        if not isinstance(final_code, int):
-            return _coerce(result, "implementer handoff missing or invalid: final_exit_code")
-        if final_code != 0:
-            return _coerce(result, f"implementer handoff.final_exit_code is {final_code} — tests still fail")
+        try:
+            typed_handoff = ImplementerHandoff.model_validate(raw)
+        except ValidationError as e:
+            fields = _invalid_fields(e)
+            return _coerce(result, f"implementer handoff missing or invalid: {', '.join(fields)}")
+        if typed_handoff.final_exit_code != 0:
+            return _coerce(
+                result,
+                f"implementer handoff.final_exit_code is {typed_handoff.final_exit_code} — tests still fail",
+            )
 
     log_path = child_dir / "logs" / f"{spec.role}-{attempt}.log"
     # Sandbox markers first: if the runner was blocked, any stray mention of
@@ -139,8 +145,8 @@ def verify_child_result(
     # test_command (tester supplies it directly; implementer may omit it). If
     # we can't derive a signature, we skip the log-mention check rather than
     # false-flag a real run — the handoff field checks above still apply.
-    test_cmd = handoff.get("test_command")
-    if not isinstance(test_cmd, str) or not test_cmd:
+    test_cmd = typed_handoff.test_command if typed_handoff is not None else None
+    if not test_cmd:
         return result
     signature = _test_command_signature(test_cmd)
     if not signature:
@@ -153,6 +159,19 @@ def verify_child_result(
         )
 
     return result
+
+
+def _invalid_fields(e: ValidationError) -> list[str]:
+    """Extract the dotted field paths reported by a ValidationError."""
+    fields: list[str] = []
+    seen: set[str] = set()
+    for err in e.errors():
+        loc = err.get("loc", ())
+        field = ".".join(str(p) for p in loc) if loc else "<root>"
+        if field not in seen:
+            seen.add(field)
+            fields.append(field)
+    return fields
 
 
 def _coerce(result: Result, reason: str, *, status: str = "failure") -> Result:

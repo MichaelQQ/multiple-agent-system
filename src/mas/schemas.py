@@ -82,6 +82,32 @@ class ProposalHandoff(BaseModel):
     suggested_changes: list[str] | None = None
 
 
+class TesterHandoff(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    test_command: str
+    test_files: list[str] = Field(default_factory=list)
+    stub_files: list[str] = Field(default_factory=list)
+    initial_exit_code: int
+    expected_exit_code_after_impl: int = 0
+    notes: str | None = None
+
+
+class ImplementerHandoff(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    changed_files: list[str] = Field(default_factory=list)
+    final_exit_code: int
+    test_command: str | None = None
+    notes: str | None = None
+
+
+class EvaluatorHandoff(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    notes: str | None = None
+
+
 class SubtaskSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
