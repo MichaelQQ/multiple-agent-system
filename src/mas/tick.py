@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
-from . import audit, board, current_subtask, transitions, worktree
+from . import audit, board, current_subtask, state as _state, transitions, worktree
 from .adapters import AdapterUnavailableError, get_adapter
 from .config import load_config, project_root, project_dir, validate_config, ConfigWatcher
 from .ids import task_id as new_task_id
@@ -287,18 +287,27 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
         if next_child.role == "implementer":
             test_cmd = _resolve_test_command(plan, next_child.id, subtasks_root, result)
             result = _verify.verify_implementer_test_rerun(next_child, result, wt, test_cmd)
+        _state.update_state_from_result(
+            parent_dir, next_child, result, worktree=wt, attempt=child_attempt
+        )
         _handle_child_result(env, parent_dir, parent_task, plan, next_child, result)
         return
 
     if env.paused:
         return
 
+    resolved_inputs = _resolve_feedback_ref(next_child.inputs, plan)
+    state_obj = _state.read_state(parent_dir)
+    state_dump = state_obj.model_dump(exclude_defaults=True, exclude_none=True)
+    if state_dump:
+        resolved_inputs = {**resolved_inputs, "state": state_dump}
+
     child_task = Task(
         id=new_task_id(next_child.goal, salt=next_child.id),
         parent_id=parent_task.id,
         role=next_child.role,
         goal=next_child.goal,
-        inputs=_resolve_feedback_ref(next_child.inputs, plan),
+        inputs=resolved_inputs,
         constraints=next_child.constraints,
         prior_results=_collect_prior_results(plan, next_child.id, subtasks_root),
         cycle=parent_task.cycle,
