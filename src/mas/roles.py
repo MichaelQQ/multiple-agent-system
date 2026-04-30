@@ -8,7 +8,7 @@ from string import Template
 from typing import Any
 
 from pydantic import ValidationError as PydanticValidationError
-from .schemas import Plan, ProposerSignals, Task
+from .schemas import Plan, ProposerSignals, Result, Task
 
 log = logging.getLogger("mas.roles")
 
@@ -36,10 +36,45 @@ top-level field will be rejected and the task will fail with a validation error.
 """.strip()
 
 
+_PRIOR_RESULTS_MAX_BYTES = 8192
+_PRIOR_RESULTS_SNIPPET_CHARS = 200
+
+
+def compress_prior_results(
+    results: list[Result], *, max_bytes: int = _PRIOR_RESULTS_MAX_BYTES
+) -> list[Result]:
+    """Truncate older prior_results when their serialized form exceeds max_bytes.
+
+    Keeps the latest result verbatim. Older results are collapsed into a
+    single-line `{status} — {first 200 chars of summary}` form (newlines
+    flattened, heavy fields cleared) so prompts stop growing linearly per
+    revision cycle. Returns the original list unchanged when under budget.
+    """
+    serialized = json.dumps(
+        [r.model_dump(mode="json", exclude_none=True) for r in results], indent=2
+    )
+    if len(serialized.encode("utf-8")) <= max_bytes or len(results) <= 1:
+        return results
+    *older, latest = results
+    compressed: list[Result] = []
+    for r in older:
+        snippet = " ".join((r.summary or "").split())[:_PRIOR_RESULTS_SNIPPET_CHARS]
+        compressed.append(
+            Result(
+                task_id=r.task_id,
+                status=r.status,
+                summary=f"{r.status} — {snippet}",
+            )
+        )
+    compressed.append(latest)
+    return compressed
+
+
 def render_prompt(template_path: Path, task: Task, **extra: Any) -> str:
     tmpl = Template(template_path.read_text())
+    priors = compress_prior_results(task.prior_results)
     prior_results_json = json.dumps(
-        [r.model_dump(mode="json", exclude_none=True) for r in task.prior_results],
+        [r.model_dump(mode="json", exclude_none=True) for r in priors],
         indent=2,
     )
     vars_ = {

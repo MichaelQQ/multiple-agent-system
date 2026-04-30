@@ -13,6 +13,7 @@ from mas.roles import (
     _list_proposed_tasks,
     _run,
     _shallow_tree,
+    compress_prior_results,
     find_similar_goal,
     gather_proposer_signals,
     goal_similarity,
@@ -150,6 +151,93 @@ Unmatched: $unmatched_var
         assert "Result Schema:" in result
         assert "task_id" in result
         assert "status" in result
+
+
+class TestCompressPriorResults:
+    """Tests for compress_prior_results truncation helper."""
+
+    def test_returns_unchanged_when_under_budget(self):
+        results = [
+            Result(task_id="r1", status="success", summary="short"),
+            Result(task_id="r2", status="success", summary="also short"),
+        ]
+        assert compress_prior_results(results, max_bytes=8192) == results
+
+    def test_returns_unchanged_when_single_result(self):
+        big = "x" * 20_000
+        results = [Result(task_id="r1", status="success", summary=big)]
+        assert compress_prior_results(results, max_bytes=100) == results
+
+    def test_returns_unchanged_when_empty(self):
+        assert compress_prior_results([], max_bytes=10) == []
+
+    def test_compresses_older_when_over_budget(self):
+        big = "x" * 5_000
+        older = Result(
+            task_id="r1",
+            status="success",
+            summary=big,
+            artifacts=["a", "b", "c"],
+            handoff={"k": "v"},
+            feedback="lots of feedback " * 100,
+            tokens_in=12345,
+            cost_usd=0.42,
+        )
+        latest = Result(
+            task_id="r2",
+            status="needs_revision",
+            summary="latest verbatim",
+            handoff={"keep": "me"},
+        )
+        out = compress_prior_results([older, latest], max_bytes=512)
+
+        assert len(out) == 2
+        assert out[1] == latest
+
+        compressed = out[0]
+        assert compressed.task_id == "r1"
+        assert compressed.status == "success"
+        assert compressed.summary.startswith("success — ")
+        assert "x" in compressed.summary
+        assert len(compressed.summary) < 250
+        assert compressed.handoff is None
+        assert compressed.artifacts == []
+        assert compressed.feedback is None
+        assert compressed.tokens_in is None
+        assert compressed.cost_usd is None
+
+    def test_compressed_summary_is_single_line(self):
+        older = Result(
+            task_id="r1",
+            status="failure",
+            summary="line one\nline two\nline three " + ("y" * 5_000),
+        )
+        latest = Result(task_id="r2", status="success", summary="ok")
+        out = compress_prior_results([older, latest], max_bytes=256)
+        assert "\n" not in out[0].summary
+
+    def test_serialized_size_drops_after_compression(self):
+        bulky = [
+            Result(
+                task_id=f"r{i}",
+                status="success",
+                summary="z" * 4_000,
+                feedback="f" * 4_000,
+            )
+            for i in range(4)
+        ]
+        latest = Result(task_id="rL", status="success", summary="latest")
+        before = len(
+            json.dumps(
+                [r.model_dump(mode="json", exclude_none=True) for r in bulky + [latest]]
+            )
+        )
+        out = compress_prior_results(bulky + [latest], max_bytes=8192)
+        after = len(
+            json.dumps([r.model_dump(mode="json", exclude_none=True) for r in out])
+        )
+        assert after < before
+        assert out[-1].summary == "latest"
 
 
 class TestGatherProposerSignals:
