@@ -284,6 +284,9 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
         result = _verify.verify_child_result(next_child, result, child_dir, child_attempt)
         if next_child.role == "evaluator":
             result = _verify.verify_evaluator_result(next_child, result, wt)
+        if next_child.role == "implementer":
+            test_cmd = _resolve_test_command(plan, next_child.id, subtasks_root, result)
+            result = _verify.verify_implementer_test_rerun(next_child, result, wt, test_cmd)
         _handle_child_result(env, parent_dir, parent_task, plan, next_child, result)
         return
 
@@ -318,6 +321,32 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
         subtask_id=next_child.id,
         summary=f"dispatched {next_child.role}",
     )
+
+
+def _resolve_test_command(
+    plan: Plan, current_id: str, subtasks_root: Path, result: Result
+) -> str | None:
+    """Find the test_command for an implementer re-run: prefer the implementer's
+    own handoff, else walk back through prior subtasks for the most recent
+    tester's declared test_command."""
+    h = result.handoff or {}
+    if isinstance(h.get("test_command"), str) and h["test_command"]:
+        return h["test_command"]
+    priors: list = []
+    for spec in plan.subtasks:
+        if spec.id == current_id:
+            break
+        priors.append(spec)
+    for spec in reversed(priors):
+        if spec.role != "tester":
+            continue
+        r = board.read_result(subtasks_root / spec.id)
+        if r is None or r.handoff is None:
+            continue
+        cmd = r.handoff.get("test_command")
+        if isinstance(cmd, str) and cmd:
+            return cmd
+    return None
 
 
 def _collect_prior_results(plan: Plan, current_id: str, subtasks_root: Path) -> list[Result]:

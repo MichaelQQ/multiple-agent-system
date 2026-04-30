@@ -479,6 +479,82 @@ def test_collect_prior_results_returns_preceding_siblings(tmp_path: Path):
     assert priors[0].handoff["test_command"] == "pytest tests/new.py"
 
 
+def test_resolve_test_command_prefers_implementer_handoff(tmp_path: Path):
+    from mas.tick import _resolve_test_command
+
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent = board.task_dir(mas, "doing", "20260415-p-rtc1-aaaa")
+    parent.mkdir(parents=True)
+    subtasks = parent / "subtasks"
+    subtasks.mkdir()
+    plan = Plan(
+        parent_id="20260415-p-rtc1-aaaa", summary="s",
+        subtasks=[
+            SubtaskSpec(id="20260415-test-1-aaaa", role="tester", goal="t"),
+            SubtaskSpec(id="20260415-impl-1-aaaa", role="implementer", goal="i"),
+        ],
+    )
+    d = subtasks / "20260415-test-1-aaaa"
+    d.mkdir()
+    (d / "result.json").write_text(
+        Result(task_id="20260415-test-1-aaaa", status="success", summary="t",
+               handoff={"test_command": "pytest tests/from_tester.py", "initial_exit_code": 1}
+               ).model_dump_json()
+    )
+    impl_result = Result(task_id="20260415-impl-1-aaaa", status="success", summary="i",
+                         handoff={"test_command": "pytest tests/from_impl.py", "final_exit_code": 0})
+    cmd = _resolve_test_command(plan, "20260415-impl-1-aaaa", subtasks, impl_result)
+    assert cmd == "pytest tests/from_impl.py"
+
+
+def test_resolve_test_command_falls_back_to_tester(tmp_path: Path):
+    from mas.tick import _resolve_test_command
+
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent = board.task_dir(mas, "doing", "20260415-p-rtc2-aaaa")
+    parent.mkdir(parents=True)
+    subtasks = parent / "subtasks"
+    subtasks.mkdir()
+    plan = Plan(
+        parent_id="20260415-p-rtc2-aaaa", summary="s",
+        subtasks=[
+            SubtaskSpec(id="20260415-test-1-aaaa", role="tester", goal="t"),
+            SubtaskSpec(id="20260415-impl-1-aaaa", role="implementer", goal="i"),
+        ],
+    )
+    d = subtasks / "20260415-test-1-aaaa"
+    d.mkdir()
+    (d / "result.json").write_text(
+        Result(task_id="20260415-test-1-aaaa", status="success", summary="t",
+               handoff={"test_command": "pytest tests/from_tester.py", "initial_exit_code": 1}
+               ).model_dump_json()
+    )
+    impl_result = Result(task_id="20260415-impl-1-aaaa", status="success", summary="i",
+                         handoff={"final_exit_code": 0})
+    cmd = _resolve_test_command(plan, "20260415-impl-1-aaaa", subtasks, impl_result)
+    assert cmd == "pytest tests/from_tester.py"
+
+
+def test_resolve_test_command_returns_none_when_no_tester(tmp_path: Path):
+    from mas.tick import _resolve_test_command
+
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent = board.task_dir(mas, "doing", "20260415-p-rtc3-aaaa")
+    parent.mkdir(parents=True)
+    subtasks = parent / "subtasks"
+    subtasks.mkdir()
+    plan = Plan(
+        parent_id="20260415-p-rtc3-aaaa", summary="s",
+        subtasks=[SubtaskSpec(id="20260415-impl-1-aaaa", role="implementer", goal="i")],
+    )
+    impl_result = Result(task_id="20260415-impl-1-aaaa", status="success", summary="i",
+                         handoff={"final_exit_code": 0})
+    assert _resolve_test_command(plan, "20260415-impl-1-aaaa", subtasks, impl_result) is None
+
+
 def test_collect_prior_results_empty_for_first_subtask(tmp_path: Path):
     mas = tmp_path / ".mas"
     board.ensure_layout(mas)

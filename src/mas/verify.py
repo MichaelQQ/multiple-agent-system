@@ -28,11 +28,14 @@ from __future__ import annotations
 
 import re
 import shlex
+import subprocess
 from pathlib import Path
 
 from pydantic import ValidationError
 
 from .schemas import ImplementerHandoff, Result, SubtaskSpec, TesterHandoff
+
+_VERIFY_RERUN_TIMEOUT_S = 300
 
 _SANDBOX_MARKERS = (
     "blocked by the sandbox",
@@ -156,6 +159,72 @@ def verify_child_result(
             result,
             f"{spec.role} log does not mention the declared test runner {signature!r} "
             f"(from test_command={test_cmd!r}) — self-reported exit code is unverified",
+        )
+
+    return result
+
+
+def verify_implementer_test_rerun(
+    spec: SubtaskSpec,
+    result: Result,
+    worktree: Path,
+    test_command: str | None,
+    timeout_s: int = _VERIFY_RERUN_TIMEOUT_S,
+) -> Result:
+    """Headlessly re-run the declared test_command in the worktree to validate
+    an implementer's claim of final_exit_code=0. Catches fabricated success.
+
+    Skipped when: result is not a successful implementer claim, the spec is
+    docs_only, no test_command is available, or the worktree path is missing.
+    A non-zero re-run exit code coerces the result to failure; failure to
+    invoke the runner becomes environment_error so retries don't burn the
+    role's retry budget on bad environment."""
+    if result.status != "success":
+        return result
+    if spec.role != "implementer":
+        return result
+    if _is_docs_only(spec):
+        return result
+    if not test_command:
+        return result
+    if not worktree.is_dir():
+        return result
+
+    raw = result.handoff or {}
+    if raw.get("final_exit_code") != 0:
+        return result
+
+    try:
+        proc = subprocess.run(
+            test_command,
+            shell=True,
+            cwd=str(worktree),
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+        )
+    except subprocess.TimeoutExpired:
+        return _coerce(
+            result,
+            f"implementer test re-run timed out after {timeout_s}s "
+            f"(test_command={test_command!r}) — claim of final_exit_code=0 unverified",
+        )
+    except OSError as e:
+        return _coerce(
+            result,
+            f"implementer test re-run failed to start: {e} "
+            f"(test_command={test_command!r})",
+            status="environment_error",
+        )
+
+    if proc.returncode != 0:
+        combined = (proc.stdout or "") + (proc.stderr or "")
+        tail = "\n".join(combined.splitlines()[-20:])
+        return _coerce(
+            result,
+            f"implementer claimed final_exit_code=0 but headless re-run of "
+            f"{test_command!r} returned exit_code={proc.returncode}. "
+            f"output tail:\n{tail}",
         )
 
     return result

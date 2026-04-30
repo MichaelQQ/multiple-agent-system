@@ -141,6 +141,113 @@ def test_verify_tester_cargo_test_missing_in_log(tmp_path: Path):
     assert "cargo" in out.summary
 
 
+# --- implementer test re-run verifier --------------------------------------
+
+from mas.verify import verify_implementer_test_rerun
+
+
+def test_verify_rerun_passthrough_non_implementer(tmp_path: Path):
+    spec = SubtaskSpec(id="t-1", role="tester", goal="t")
+    r = Result(task_id="x", status="success", summary="ok",
+               handoff={"test_command": "true", "initial_exit_code": 1})
+    out = verify_implementer_test_rerun(spec, r, tmp_path, "true")
+    assert out is r
+
+
+def test_verify_rerun_passthrough_failure(tmp_path: Path):
+    spec = SubtaskSpec(id="i-1", role="implementer", goal="i")
+    r = Result(task_id="x", status="failure", summary="nope",
+               handoff={"final_exit_code": 1})
+    out = verify_implementer_test_rerun(spec, r, tmp_path, "false")
+    assert out is r
+
+
+def test_verify_rerun_passthrough_docs_only(tmp_path: Path):
+    spec = SubtaskSpec(id="i-1", role="implementer", goal="docs",
+                       constraints={"docs_only": True})
+    r = Result(task_id="x", status="success", summary="docs",
+               handoff={"final_exit_code": 0})
+    out = verify_implementer_test_rerun(spec, r, tmp_path, "false")
+    assert out is r
+
+
+def test_verify_rerun_skipped_without_test_command(tmp_path: Path):
+    spec = SubtaskSpec(id="i-1", role="implementer", goal="i")
+    r = Result(task_id="x", status="success", summary="impl",
+               handoff={"final_exit_code": 0})
+    out = verify_implementer_test_rerun(spec, r, tmp_path, None)
+    assert out is r
+
+
+def test_verify_rerun_skipped_when_worktree_missing(tmp_path: Path):
+    spec = SubtaskSpec(id="i-1", role="implementer", goal="i")
+    r = Result(task_id="x", status="success", summary="impl",
+               handoff={"final_exit_code": 0})
+    out = verify_implementer_test_rerun(spec, r, tmp_path / "nope", "false")
+    assert out is r
+
+
+def test_verify_rerun_passes_when_command_succeeds(tmp_path: Path):
+    spec = SubtaskSpec(id="i-1", role="implementer", goal="i")
+    r = Result(task_id="x", status="success", summary="impl",
+               handoff={"final_exit_code": 0})
+    out = verify_implementer_test_rerun(spec, r, tmp_path, "true")
+    assert out.status == "success"
+    assert out is r
+
+
+def test_verify_rerun_coerces_when_command_fails(tmp_path: Path):
+    spec = SubtaskSpec(id="i-1", role="implementer", goal="i")
+    r = Result(task_id="x", status="success", summary="impl",
+               handoff={"final_exit_code": 0})
+    out = verify_implementer_test_rerun(spec, r, tmp_path, "false")
+    assert out.status == "failure"
+    assert "headless re-run" in out.summary
+    assert "exit_code=1" in out.summary
+
+
+def test_verify_rerun_captures_output_tail_on_failure(tmp_path: Path):
+    spec = SubtaskSpec(id="i-1", role="implementer", goal="i")
+    r = Result(task_id="x", status="success", summary="impl",
+               handoff={"final_exit_code": 0})
+    out = verify_implementer_test_rerun(
+        spec, r, tmp_path,
+        "echo MARKER_LINE_42 >&2; exit 7",
+    )
+    assert out.status == "failure"
+    assert "exit_code=7" in out.summary
+    assert "MARKER_LINE_42" in out.summary
+
+
+def test_verify_rerun_runs_in_worktree_cwd(tmp_path: Path):
+    spec = SubtaskSpec(id="i-1", role="implementer", goal="i")
+    (tmp_path / "marker").write_text("ok")
+    r = Result(task_id="x", status="success", summary="impl",
+               handoff={"final_exit_code": 0})
+    out = verify_implementer_test_rerun(spec, r, tmp_path, "test -f marker")
+    assert out.status == "success"
+    assert out is r
+
+
+def test_verify_rerun_timeout_coerces(tmp_path: Path):
+    spec = SubtaskSpec(id="i-1", role="implementer", goal="i")
+    r = Result(task_id="x", status="success", summary="impl",
+               handoff={"final_exit_code": 0})
+    out = verify_implementer_test_rerun(spec, r, tmp_path, "sleep 5", timeout_s=1)
+    assert out.status == "failure"
+    assert "timed out" in out.summary
+
+
+def test_verify_rerun_skips_when_implementer_claims_nonzero(tmp_path: Path):
+    """Implementer that didn't claim 0 is left to verify_child_result; the
+    re-run shouldn't fire (and shouldn't accidentally upgrade)."""
+    spec = SubtaskSpec(id="i-1", role="implementer", goal="i")
+    r = Result(task_id="x", status="success", summary="impl",
+               handoff={"final_exit_code": 1})
+    out = verify_implementer_test_rerun(spec, r, tmp_path, "true")
+    assert out is r
+
+
 def test_test_command_signature_extraction():
     from mas.verify import _test_command_signature
     assert _test_command_signature("pytest -q") == "pytest"
