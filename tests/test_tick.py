@@ -925,10 +925,87 @@ def test_append_revision_cycle_respects_max_cap(tmp_path: Path):
     )
     (parent / "plan.json").write_text(plan.model_dump_json())
 
-    _append_revision_cycle(parent, plan, board.read_task(parent), "more feedback")
+    appended = _append_revision_cycle(parent, plan, board.read_task(parent), "more feedback")
 
     updated = parse_plan(parent / "plan.json", "20260415-p-13-aaaa")
     assert len(updated.subtasks) == 6
+    assert appended is False
+
+
+def test_append_revision_cycle_returns_true_when_appended(tmp_path: Path):
+    """Returns True when a new cycle is appended."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent = board.task_dir(mas, "doing", "20260430-p-rt-aaaa")
+    parent.mkdir(parents=True)
+    board.write_task(parent, Task(id="20260430-p-rt-aaaa", role="orchestrator", goal="g"))
+    (parent / "subtasks").mkdir()
+    plan = Plan(parent_id="20260430-p-rt-aaaa", summary="s",
+                subtasks=[SubtaskSpec(id="20260430-eval-1-aaaa", role="evaluator", goal="eval")],
+                max_revision_cycles=2)
+    (parent / "plan.json").write_text(plan.model_dump_json())
+
+    appended = _append_revision_cycle(parent, plan, board.read_task(parent), "fb")
+    assert appended is True
+
+
+def test_handle_child_result_moves_parent_to_failed_when_cycles_exhausted(tmp_path: Path):
+    """Evaluator needs_revision after max_revision_cycles → parent moves to failed/."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent_id = "20260430-p-ex-aaaa"
+    parent = board.task_dir(mas, "doing", parent_id)
+    parent.mkdir(parents=True)
+    board.write_task(parent, Task(id=parent_id, role="orchestrator", goal="g"))
+    subtasks = parent / "subtasks"
+    subtasks.mkdir()
+
+    final_eval_id = "rev-2-evaluator"
+    final_eval_dir = subtasks / final_eval_id
+    final_eval_dir.mkdir()
+
+    plan = Plan(
+        parent_id=parent_id, summary="s",
+        subtasks=[
+            SubtaskSpec(id="rev-1-tester", role="tester", goal="r1t"),
+            SubtaskSpec(id="rev-1-implementer", role="implementer", goal="r1"),
+            SubtaskSpec(id="rev-1-evaluator", role="evaluator", goal="r1e"),
+            SubtaskSpec(id="rev-2-tester", role="tester", goal="r2t"),
+            SubtaskSpec(id="rev-2-implementer", role="implementer", goal="r2"),
+            SubtaskSpec(id=final_eval_id, role="evaluator", goal="r2e"),
+        ],
+        max_revision_cycles=2,
+    )
+    (parent / "plan.json").write_text(plan.model_dump_json())
+
+    final_spec = next(s for s in plan.subtasks if s.id == final_eval_id)
+    result = Result(
+        task_id=final_eval_id,
+        status="needs_revision",
+        summary="still broken",
+        verdict="needs_revision",
+        feedback="not converging",
+    )
+
+    cfg = MasConfig(
+        providers={"mock": ProviderConfig(cli="sh", max_concurrent=1)},
+        roles={
+            "proposer": RoleConfig(provider="mock"),
+            "orchestrator": RoleConfig(provider="mock"),
+            "implementer": RoleConfig(provider="mock"),
+            "tester": RoleConfig(provider="mock"),
+            "evaluator": RoleConfig(provider="mock"),
+        },
+    )
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=cfg)
+
+    _handle_child_result(env, parent, board.read_task(parent), plan, final_spec, result)
+
+    assert not parent.exists(), "parent should have moved out of doing/"
+    failed_dir = mas / "tasks" / "failed" / parent_id
+    assert failed_dir.exists(), "parent should land in failed/"
+    txns = transitions.read_transitions(failed_dir)
+    assert any(t.reason == "revision_cycles_exhausted" for t in txns)
 
 
 # ---------------------------------------------------------------------------

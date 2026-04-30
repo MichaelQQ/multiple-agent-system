@@ -495,7 +495,10 @@ def _handle_child_result(env, parent_dir, parent_task, plan, spec, result):
 
     # Evaluator verdict handling
     if spec.role == "evaluator" and result.verdict == "needs_revision":
-        _append_revision_cycle(parent_dir, plan, parent_task, feedback=result.feedback or "")
+        appended = _append_revision_cycle(parent_dir, plan, parent_task, feedback=result.feedback or "")
+        if not appended:
+            failed_dir = env.mas / "tasks" / "failed" / parent_task.id
+            board.move(parent_dir, failed_dir, reason="revision_cycles_exhausted")
         return
 
     child_dir = parent_dir / "subtasks" / spec.id
@@ -542,13 +545,14 @@ def _handle_child_result(env, parent_dir, parent_task, plan, spec, result):
     board.move(parent_dir, failed_dir, reason="max_retries_exceeded")
 
 
-def _append_revision_cycle(parent_dir: Path, plan: Plan, parent_task, feedback: str) -> None:
+def _append_revision_cycle(parent_dir: Path, plan: Plan, parent_task, feedback: str) -> bool:
+    """Returns True if a new cycle was appended, False if max_revision_cycles was reached."""
     from .schemas import SubtaskSpec
 
     # Bound by plan.max_revision_cycles (count distinct cycles, not subtasks)
     existing_cycles = len({s.id.split("-", 2)[1] for s in plan.subtasks if s.id.startswith("rev-")})
     if existing_cycles >= plan.max_revision_cycles:
-        return
+        return False
 
     cycle_n = existing_cycles + 1
     cycle_key = f"rev-{cycle_n}"
@@ -564,6 +568,7 @@ def _append_revision_cycle(parent_dir: Path, plan: Plan, parent_task, feedback: 
     ]
     plan.subtasks.extend(new_children)
     (parent_dir / "plan.json").write_text(plan.model_dump_json(indent=2))
+    return True
 
 
 def _resolve_feedback_ref(spec_inputs: dict, plan: Plan) -> dict:
