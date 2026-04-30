@@ -1072,6 +1072,7 @@ def test_handle_child_result_moves_parent_to_failed_when_cycles_exhausted(tmp_pa
             "tester": RoleConfig(provider="mock"),
             "evaluator": RoleConfig(provider="mock"),
         },
+        max_replans=0,
     )
     env = TickEnv(repo=tmp_path, mas=mas, cfg=cfg)
 
@@ -1082,6 +1083,174 @@ def test_handle_child_result_moves_parent_to_failed_when_cycles_exhausted(tmp_pa
     assert failed_dir.exists(), "parent should land in failed/"
     txns = transitions.read_transitions(failed_dir)
     assert any(t.reason == "revision_cycles_exhausted" for t in txns)
+
+
+# ---------------------------------------------------------------------------
+# 7b. Replan trigger
+# ---------------------------------------------------------------------------
+
+
+def _replan_plan(parent_id: str, *, max_revision_cycles: int = 2) -> Plan:
+    return Plan(
+        parent_id=parent_id, summary="s",
+        subtasks=[
+            SubtaskSpec(id="test-1", role="tester", goal="t"),
+            SubtaskSpec(id="impl-1", role="implementer", goal="i"),
+            SubtaskSpec(id="eval-1", role="evaluator", goal="e"),
+            SubtaskSpec(id="rev-1-tester", role="tester", goal="r1t"),
+            SubtaskSpec(id="rev-1-implementer", role="implementer", goal="r1i"),
+            SubtaskSpec(id="rev-1-evaluator", role="evaluator", goal="r1e"),
+        ],
+        max_revision_cycles=max_revision_cycles,
+    )
+
+
+def test_replan_triggers_when_at_threshold(tmp_path: Path):
+    """After max_revision_cycles - 1 cycles fail, replan re-dispatches orchestrator."""
+    from mas.tick import _trigger_replan
+
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent_id = "20260430-p-rp1-aaaa"
+    parent = board.task_dir(mas, "doing", parent_id)
+    parent.mkdir(parents=True)
+    board.write_task(parent, Task(id=parent_id, role="orchestrator", goal="g"))
+    subtasks = parent / "subtasks"
+    subtasks.mkdir()
+    eval_dir = subtasks / "rev-1-evaluator"
+    eval_dir.mkdir()
+
+    plan = _replan_plan(parent_id)
+    (parent / "plan.json").write_text(plan.model_dump_json())
+    (parent / "result.json").write_text(
+        Result(task_id=parent_id, status="success", summary="orch done").model_dump_json()
+    )
+
+    spec = next(s for s in plan.subtasks if s.id == "rev-1-evaluator")
+    result = Result(
+        task_id="rev-1-evaluator", status="needs_revision",
+        summary="not converging", verdict="needs_revision", feedback="try a new strategy",
+    )
+
+    cfg = _cfg()
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=cfg)
+
+    _handle_child_result(env, parent, board.read_task(parent), plan, spec, result)
+
+    # plan.json archived, subtasks/ archived, .replan_count bumped, .orchestrator_attempt bumped
+    assert not (parent / "plan.json").exists()
+    assert (parent / "plan.replan-1.json").exists()
+    assert not (parent / "subtasks").exists()
+    assert (parent / "subtasks.replan-1").exists()
+    assert (parent / "result.replan-1.json").exists()
+    assert (parent / ".replan_count").read_text().strip() == "1"
+    assert (parent / ".orchestrator_attempt").read_text().strip() == "2"
+
+    # Parent task.json updated with replan_reason in inputs
+    refreshed = board.read_task(parent)
+    assert refreshed.inputs.get("replan_reason") == "try a new strategy"
+
+    # Parent stays in doing/ — next tick will re-dispatch orchestrator
+    assert parent.exists()
+
+
+def test_replan_skipped_when_max_replans_zero(tmp_path: Path):
+    """max_replans=0 disables replan; cycles exhaust normally to failed/."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent_id = "20260430-p-rp2-aaaa"
+    parent = board.task_dir(mas, "doing", parent_id)
+    parent.mkdir(parents=True)
+    board.write_task(parent, Task(id=parent_id, role="orchestrator", goal="g"))
+    (parent / "subtasks").mkdir()
+
+    plan = _replan_plan(parent_id)
+    (parent / "plan.json").write_text(plan.model_dump_json())
+
+    spec = next(s for s in plan.subtasks if s.id == "rev-1-evaluator")
+    result = Result(
+        task_id="rev-1-evaluator", status="needs_revision",
+        summary="x", verdict="needs_revision", feedback="fb",
+    )
+
+    cfg = _cfg()
+    cfg.max_replans = 0
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=cfg)
+
+    _handle_child_result(env, parent, board.read_task(parent), plan, spec, result)
+
+    # No replan files written; plan.json still present (a new revision cycle was appended)
+    assert not (parent / ".replan_count").exists()
+    assert (parent / "plan.json").exists()
+
+
+def test_replan_not_triggered_on_first_revision(tmp_path: Path):
+    """First failing eval (existing_cycles=0) gets a normal cycle, not a replan."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent_id = "20260430-p-rp3-aaaa"
+    parent = board.task_dir(mas, "doing", parent_id)
+    parent.mkdir(parents=True)
+    board.write_task(parent, Task(id=parent_id, role="orchestrator", goal="g"))
+    (parent / "subtasks").mkdir()
+
+    plan = Plan(
+        parent_id=parent_id, summary="s",
+        subtasks=[
+            SubtaskSpec(id="test-1", role="tester", goal="t"),
+            SubtaskSpec(id="impl-1", role="implementer", goal="i"),
+            SubtaskSpec(id="eval-1", role="evaluator", goal="e"),
+        ],
+        max_revision_cycles=2,
+    )
+    (parent / "plan.json").write_text(plan.model_dump_json())
+
+    spec = next(s for s in plan.subtasks if s.id == "eval-1")
+    result = Result(
+        task_id="eval-1", status="needs_revision",
+        summary="x", verdict="needs_revision", feedback="fb",
+    )
+
+    cfg = _cfg()
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=cfg)
+
+    _handle_child_result(env, parent, board.read_task(parent), plan, spec, result)
+
+    # rev-1-* appended; no replan
+    assert not (parent / ".replan_count").exists()
+    refreshed_plan = parse_plan(parent / "plan.json", parent_id)
+    assert any(s.id.startswith("rev-1-") for s in refreshed_plan.subtasks)
+
+
+def test_replan_respects_max_replans_cap(tmp_path: Path):
+    """Once .replan_count >= max_replans, falls back to normal revision/exhaustion path."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent_id = "20260430-p-rp4-aaaa"
+    parent = board.task_dir(mas, "doing", parent_id)
+    parent.mkdir(parents=True)
+    board.write_task(parent, Task(id=parent_id, role="orchestrator", goal="g"))
+    (parent / "subtasks").mkdir()
+    (parent / ".replan_count").write_text("1")  # already used the budget
+
+    plan = _replan_plan(parent_id)
+    (parent / "plan.json").write_text(plan.model_dump_json())
+
+    spec = next(s for s in plan.subtasks if s.id == "rev-1-evaluator")
+    result = Result(
+        task_id="rev-1-evaluator", status="needs_revision",
+        summary="x", verdict="needs_revision", feedback="fb",
+    )
+
+    cfg = _cfg()  # max_replans defaults to 1
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=cfg)
+
+    _handle_child_result(env, parent, board.read_task(parent), plan, spec, result)
+
+    # No new replan; rev-2 cycle appended instead
+    assert (parent / ".replan_count").read_text().strip() == "1"
+    refreshed_plan = parse_plan(parent / "plan.json", parent_id)
+    assert any(s.id.startswith("rev-2-") for s in refreshed_plan.subtasks)
 
 
 # ---------------------------------------------------------------------------

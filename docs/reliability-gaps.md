@@ -90,7 +90,7 @@ Effort: S (trace) + M (patterns).
 - [x] **5.** Retrieval slice for `prior_results` — filter by current role + filename regex (gap 6)
 - [x] **6.** `parent_dir/state.json` foundation: write/read on every child completion (gap 2)
 - [x] **7.** Git tag snapshots `mas/{task_id}/green-{cycle}` on green (gap 2)
-- [ ] **8.** Replan trigger: orchestrator re-dispatch with `replan_reason` after near-exhaustion (gap 4)
+- [x] **8.** Replan trigger: orchestrator re-dispatch with `replan_reason` after near-exhaustion (gap 4)
 - [ ] **9.** Convergence detector: Jaccard similarity on cycle-N vs cycle-(N-1) feedback (gap 4)
 - [ ] **10.** `subtask.constraints.allowed_paths` post-hoc enforcement via `git diff --name-only` (gap 5)
 - [ ] **11.** `mas verify <task_id>` CLI: re-run recorded `test_command` and audit (gap 5)

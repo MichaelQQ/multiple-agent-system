@@ -549,7 +549,11 @@ def _handle_child_result(env, parent_dir, parent_task, plan, spec, result):
 
     # Evaluator verdict handling
     if spec.role == "evaluator" and result.verdict == "needs_revision":
-        appended = _append_revision_cycle(parent_dir, plan, parent_task, feedback=result.feedback or "")
+        feedback = result.feedback or ""
+        if _should_trigger_replan(plan, parent_dir, env.cfg.max_replans):
+            _trigger_replan(env, parent_dir, parent_task, reason=feedback)
+            return
+        appended = _append_revision_cycle(parent_dir, plan, parent_task, feedback=feedback)
         if not appended:
             failed_dir = env.mas / "tasks" / "failed" / parent_task.id
             board.move(parent_dir, failed_dir, reason="revision_cycles_exhausted")
@@ -597,6 +601,75 @@ def _handle_child_result(env, parent_dir, parent_task, plan, spec, result):
     # Retries exhausted → move parent to failed/
     failed_dir = env.mas / "tasks" / "failed" / parent_task.id
     board.move(parent_dir, failed_dir, reason="max_retries_exceeded")
+
+
+def _read_replan_count(parent_dir: Path) -> int:
+    p = parent_dir / ".replan_count"
+    if not p.exists():
+        return 0
+    try:
+        return int(p.read_text().strip())
+    except (ValueError, OSError):
+        return 0
+
+
+def _should_trigger_replan(plan: Plan, parent_dir: Path, max_replans: int) -> bool:
+    """True when next revision should be replaced by re-dispatching the orchestrator.
+
+    Fires when at least one revision cycle has run AND we'd be about to add the
+    final allowed cycle (existing >= max_revision_cycles - 1), bounded by
+    `max_replans`. The first failing eval still gets a normal revision cycle.
+    """
+    if max_replans <= 0:
+        return False
+    if _read_replan_count(parent_dir) >= max_replans:
+        return False
+    existing = len({s.id.split("-", 2)[1] for s in plan.subtasks if s.id.startswith("rev-")})
+    if existing < 1:
+        return False
+    return existing >= plan.max_revision_cycles - 1
+
+
+def _trigger_replan(env: TickEnv, parent_dir: Path, parent_task: Task, reason: str) -> None:
+    """Re-dispatch orchestrator with `inputs.replan_reason` set.
+
+    Archives the current plan and subtasks under `*.replan-{N}/`, clears the
+    parent's stale orchestrator result, bumps `.orchestrator_attempt` so the
+    orphan detector sees a fresh slot, and writes the updated parent task.json
+    so the next tick re-enters the orchestrator code path.
+    """
+    n = _read_replan_count(parent_dir) + 1
+    (parent_dir / ".replan_count").write_text(str(n))
+
+    plan_path = parent_dir / "plan.json"
+    if plan_path.exists():
+        plan_path.rename(parent_dir / f"plan.replan-{n}.json")
+    subtasks_dir = parent_dir / "subtasks"
+    if subtasks_dir.exists():
+        subtasks_dir.rename(parent_dir / f"subtasks.replan-{n}")
+    parent_result = parent_dir / "result.json"
+    if parent_result.exists():
+        parent_result.rename(parent_dir / f"result.replan-{n}.json")
+    current_subtask._delete_current_subtask_marker(parent_dir)
+
+    orch_attempt = _read_attempt(parent_dir / ".orchestrator_attempt")
+    (parent_dir / ".orchestrator_attempt").write_text(str(orch_attempt + 1))
+
+    parent_task.inputs = {**parent_task.inputs, "replan_reason": reason}
+    board.write_task(parent_dir, parent_task)
+
+    transitions.log_transition(
+        parent_dir, "needs_revision", "replanning",
+        f"replan_{n}_triggered: max cycles approached"
+    )
+    audit.append_event(
+        parent_dir,
+        event="replan",
+        task_id=parent_task.id,
+        role="orchestrator",
+        provider=env.cfg.roles["orchestrator"].provider,
+        summary=f"replan {n}: re-dispatching orchestrator",
+    )
 
 
 def _append_revision_cycle(parent_dir: Path, plan: Plan, parent_task, feedback: str) -> bool:

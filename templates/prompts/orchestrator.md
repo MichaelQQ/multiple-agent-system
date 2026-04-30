@@ -12,6 +12,11 @@ Every plan MUST include a docs subtask unless the parent goal is purely
 internal (no behavior, config, CLI, or public API change) — in that case,
 state the reason in the plan `summary`.
 
+If `inputs.replan_reason` is present, this is a re-dispatch after a prior
+plan failed to converge. Read the reason carefully and emit a *different*
+plan — change the test approach, decomposition, or implementation strategy.
+Do not repeat the previous plan verbatim.
+
 Task id: $task_id
 Goal: $goal
 Inputs:
