@@ -87,7 +87,7 @@ Effort: S (trace) + M (patterns).
 - [x] **2.** Typed handoff schemas: replace `Result.handoff: dict[str, Any]` with role-specific Pydantic models (gap 1)
 - [x] **3.** Headless test re-run verifier in tick before accepting implementer success (gap 1)
 - [x] **4.** `compress_prior_results` truncation helper, applied when serialized size > 8KB (gap 6)
-- [ ] **5.** Retrieval slice for `prior_results` — filter by current role + filename regex (gap 6)
+- [x] **5.** Retrieval slice for `prior_results` — filter by current role + filename regex (gap 6)
 - [ ] **6.** `parent_dir/state.json` foundation: write/read on every child completion (gap 2)
 - [ ] **7.** Git tag snapshots `mas/{task_id}/green-{cycle}` on green (gap 2)
 - [ ] **8.** Replan trigger: orchestrator re-dispatch with `replan_reason` after near-exhaustion (gap 4)

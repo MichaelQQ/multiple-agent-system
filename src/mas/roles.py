@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import subprocess
 from pathlib import Path
 from string import Template
-from typing import Any
+from typing import Any, Iterable
 
 from pydantic import ValidationError as PydanticValidationError
 from .schemas import Plan, ProposerSignals, Result, Task
@@ -38,6 +39,74 @@ top-level field will be rejected and the task will fail with a validation error.
 
 _PRIOR_RESULTS_MAX_BYTES = 8192
 _PRIOR_RESULTS_SNIPPET_CHARS = 200
+
+_FILENAME_REGEX = re.compile(
+    r"[\w./-]+\.(?:py|md|js|ts|tsx|jsx|json|yaml|yml|toml|sh|rs|go|java|html|css|sql)"
+)
+
+
+def extract_filename_refs(value: Any) -> set[str]:
+    """Find filename-shaped tokens in any JSON-serializable value.
+
+    Used by retrieval_slice to identify files the current subtask cares about,
+    so prior results that mention those files are kept even when the role
+    doesn't match.
+    """
+    if value is None:
+        return set()
+    try:
+        text = json.dumps(value, default=str)
+    except (TypeError, ValueError):
+        text = str(value)
+    return set(_FILENAME_REGEX.findall(text))
+
+
+def retrieval_slice(
+    candidates: list[tuple[str, Result]],
+    *,
+    current_role: str,
+    current_filenames: Iterable[str] = (),
+) -> list[Result]:
+    """Filter prior results to entries relevant to the current role.
+
+    Keeps a result when any of:
+      - It came from the same role as `current_role` (preserves revision
+        history for the role being re-dispatched).
+      - It is the most recent result for its role among the priors (preserves
+        cross-role TDD handoff: tester -> implementer -> evaluator).
+      - Its `feedback`, `summary`, or `artifacts` mention any filename in
+        `current_filenames` (basename or full path, substring match).
+
+    Order of `candidates` is preserved. Returns all results unchanged when
+    `current_role` is empty.
+    """
+    if not current_role:
+        return [r for _, r in candidates]
+
+    fnames = [f for f in current_filenames if f]
+    bases = {f.rsplit("/", 1)[-1] for f in fnames}
+
+    last_idx_by_role: dict[str, int] = {}
+    for i, (role, _) in enumerate(candidates):
+        last_idx_by_role[role] = i
+
+    out: list[Result] = []
+    for i, (role, r) in enumerate(candidates):
+        if role == current_role:
+            out.append(r)
+            continue
+        if last_idx_by_role.get(role) == i:
+            out.append(r)
+            continue
+        text_blob = " ".join(
+            filter(None, [r.feedback, r.summary, " ".join(r.artifacts)])
+        )
+        if text_blob and (
+            any(fn and fn in text_blob for fn in fnames)
+            or any(b and b in text_blob for b in bases)
+        ):
+            out.append(r)
+    return out
 
 
 def compress_prior_results(

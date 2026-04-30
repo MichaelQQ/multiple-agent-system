@@ -14,11 +14,13 @@ from mas.roles import (
     _run,
     _shallow_tree,
     compress_prior_results,
+    extract_filename_refs,
     find_similar_goal,
     gather_proposer_signals,
     goal_similarity,
     parse_plan,
     render_prompt,
+    retrieval_slice,
 )
 from mas.schemas import Plan, ProposerSignals, Result, Task
 
@@ -238,6 +240,135 @@ class TestCompressPriorResults:
         )
         assert after < before
         assert out[-1].summary == "latest"
+
+
+class TestRetrievalSlice:
+    """Tests for retrieval_slice and extract_filename_refs."""
+
+    def test_empty_candidates_returns_empty(self):
+        assert retrieval_slice([], current_role="implementer") == []
+
+    def test_returns_all_when_current_role_empty(self):
+        r1 = Result(task_id="r1", status="success", summary="s")
+        out = retrieval_slice([("tester", r1)], current_role="")
+        assert out == [r1]
+
+    def test_keeps_same_role_priors(self):
+        impl1 = Result(task_id="r1", status="failure", summary="impl rev0")
+        impl2 = Result(task_id="r2", status="success", summary="impl rev1")
+        out = retrieval_slice(
+            [("implementer", impl1), ("implementer", impl2)],
+            current_role="implementer",
+        )
+        assert out == [impl1, impl2]
+
+    def test_keeps_latest_per_other_role(self):
+        tester = Result(task_id="t1", status="success", summary="tests")
+        out = retrieval_slice(
+            [("tester", tester)], current_role="implementer"
+        )
+        assert out == [tester]
+
+    def test_drops_older_other_role_when_replaced(self):
+        impl_old = Result(task_id="i1", status="failure", summary="old impl")
+        impl_new = Result(task_id="i2", status="success", summary="new impl")
+        out = retrieval_slice(
+            [("implementer", impl_old), ("implementer", impl_new)],
+            current_role="evaluator",
+        )
+        assert out == [impl_new]
+
+    def test_keeps_filename_overlap_match(self):
+        """A non-latest, non-same-role prior is kept when its text mentions
+        a filename referenced by the current subtask."""
+        impl_old = Result(
+            task_id="i1",
+            status="failure",
+            summary="touched src/foo.py extensively",
+        )
+        impl_new = Result(task_id="i2", status="success", summary="impl rev1")
+        out = retrieval_slice(
+            [("implementer", impl_old), ("implementer", impl_new)],
+            current_role="evaluator",
+            current_filenames=["src/foo.py"],
+        )
+        assert impl_old in out
+        assert impl_new in out
+
+    def test_basename_only_match(self):
+        impl_old = Result(
+            task_id="i1", status="failure", summary="changed foo.py logic"
+        )
+        impl_new = Result(task_id="i2", status="success", summary="latest")
+        out = retrieval_slice(
+            [("implementer", impl_old), ("implementer", impl_new)],
+            current_role="evaluator",
+            current_filenames=["src/pkg/foo.py"],
+        )
+        assert impl_old in out
+
+    def test_filename_match_in_artifacts(self):
+        impl_old = Result(
+            task_id="i1",
+            status="success",
+            summary="ok",
+            artifacts=["src/foo.py"],
+        )
+        impl_new = Result(task_id="i2", status="success", summary="latest")
+        out = retrieval_slice(
+            [("implementer", impl_old), ("implementer", impl_new)],
+            current_role="evaluator",
+            current_filenames=["src/foo.py"],
+        )
+        assert impl_old in out
+
+    def test_preserves_order(self):
+        a = Result(task_id="a", status="success", summary="a")
+        b = Result(task_id="b", status="success", summary="b")
+        c = Result(task_id="c", status="success", summary="c")
+        out = retrieval_slice(
+            [("tester", a), ("implementer", b), ("evaluator", c)],
+            current_role="implementer",
+        )
+        assert out == [a, b, c]
+
+    def test_tdd_chain_preserved_for_implementer(self):
+        """Realistic case: implementer rev2 still sees tester + prior impls + prior eval."""
+        tester = Result(task_id="t1", status="success", summary="tests")
+        impl1 = Result(task_id="i1", status="failure", summary="rev0")
+        eval1 = Result(task_id="e1", status="success", summary="needs revision")
+        out = retrieval_slice(
+            [("tester", tester), ("implementer", impl1), ("evaluator", eval1)],
+            current_role="implementer",
+        )
+        assert out == [tester, impl1, eval1]
+
+
+class TestExtractFilenameRefs:
+    def test_finds_python_path_in_string(self):
+        assert "src/foo.py" in extract_filename_refs("update src/foo.py soon")
+
+    def test_finds_filenames_in_dict(self):
+        d = {"target_module": "src/mas/tick.py", "test_files": ["tests/x.py"]}
+        out = extract_filename_refs(d)
+        assert "src/mas/tick.py" in out
+        assert "tests/x.py" in out
+
+    def test_ignores_non_file_strings(self):
+        out = extract_filename_refs({"k": "just plain text"})
+        assert out == set()
+
+    def test_handles_none(self):
+        assert extract_filename_refs(None) == set()
+
+    def test_handles_empty_dict(self):
+        assert extract_filename_refs({}) == set()
+
+    def test_finds_multiple_extensions(self):
+        d = {"a": "config.yaml", "b": "Makefile.toml", "c": "script.sh"}
+        out = extract_filename_refs(d)
+        assert "config.yaml" in out
+        assert "script.sh" in out
 
 
 class TestGatherProposerSignals:

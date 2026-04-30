@@ -350,15 +350,31 @@ def _resolve_test_command(
 
 
 def _collect_prior_results(plan: Plan, current_id: str, subtasks_root: Path) -> list[Result]:
-    """Return results of subtasks that precede current_id in plan order."""
-    priors: list[Result] = []
+    """Return prior results sliced to entries relevant to the current subtask.
+
+    Walks plan.subtasks up to (but excluding) `current_id`, reads each
+    available result, then applies `retrieval_slice` keyed on the current
+    subtask's role and filename references in its inputs.
+    """
+    from .roles import extract_filename_refs, retrieval_slice
+
+    current_spec = next((s for s in plan.subtasks if s.id == current_id), None)
+
+    candidates: list[tuple[str, Result]] = []
     for spec in plan.subtasks:
         if spec.id == current_id:
             break
         r = board.read_result(subtasks_root / spec.id)
         if r is not None:
-            priors.append(r)
-    return priors
+            candidates.append((spec.role, r))
+
+    if current_spec is None:
+        return [r for _, r in candidates]
+
+    fnames = extract_filename_refs(current_spec.inputs)
+    return retrieval_slice(
+        candidates, current_role=current_spec.role, current_filenames=fnames
+    )
 
 
 def _read_attempt(path: Path) -> int:
