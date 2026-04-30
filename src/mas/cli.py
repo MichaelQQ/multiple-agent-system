@@ -1301,6 +1301,9 @@ def pr(
 proposals_app = typer.Typer(no_args_is_help=True, help="Proposal management commands.")
 app.add_typer(proposals_app, name="proposals")
 
+from .webhooks_cmd import webhooks_app  # noqa: E402
+app.add_typer(webhooks_app, name="webhooks")
+
 
 @proposals_app.command("rejected")
 def proposals_rejected(
