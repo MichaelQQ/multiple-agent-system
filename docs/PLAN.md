@@ -30,7 +30,7 @@ The user wants strict structured data between agents (JSON files, no prose hand-
 | 18 | Eval verdicts | `pass` / `fail` / `needs_revision`. `pass` → parent to `done/`. `fail` → retry per failure policy. `needs_revision` → orchestrator appends a new implementer+tester+evaluator child triplet with evaluator feedback, bounded by `max_revision_cycles` (default 2). |
 | 19 | Completion | Worktree pruned (branch preserved). Task moves to `tasks/done/{id}/`. Human runs `gh pr create` or (v2) `mas pr <id>`. No auto-merge. |
 | 20 | Scheduling | `mas cron install` writes a crontab entry (`*/5 * * * * cd <project> && mas tick >> .mas/logs/tick.log 2>&1`). `uninstall`, `status` siblings. macOS may use launchd — v2. |
-| 21 | CLI surface (v1) | `mas init`, `mas tick`, `mas show`, `mas promote <id>`, `mas retry <id>`, `mas logs <id> [-f]`, `mas cron {install,uninstall,status}`. v2 shipped: `validate`, `delete`, `tail`, `prune`, `audit`, `events`, `cost`, `stats`, `upgrade`, `daemon {start,stop,status}`, `web`, `pr <id>` (open a GitHub PR for a done task via `gh`). v2 remaining: `kill`, `doctor`. |
+| 21 | CLI surface (v1) | `mas init`, `mas tick`, `mas show`, `mas promote <id>`, `mas retry <id>`, `mas logs <id> [-f]`, `mas cron {install,uninstall,status}`. v2 shipped: `validate`, `delete`, `tail`, `prune`, `audit`, `events`, `cost`, `stats`, `upgrade`, `daemon {start,stop,status}`, `web`, `pr <id>` (open a GitHub PR for a done task via `gh`), `webhooks test` (send synthetic test payload to configured webhooks). v2 remaining: `kill`, `doctor`. |
 
 ## Shipping defaults (pushable-back)
 

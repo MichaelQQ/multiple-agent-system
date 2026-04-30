@@ -15,6 +15,13 @@ def _event_matches(event: str, from_col: str, to_col: str) -> bool:
     return event == to_col
 
 
+def _post_webhook(url: str, data: bytes, timeout_s: float):
+    """Perform a single HTTP POST. Returns response object or raises."""
+    req = urllib.request.Request(url, data=data, method="POST")
+    req.add_header("Content-Type", "application/json")
+    return urllib.request.urlopen(req, timeout=timeout_s)
+
+
 def fire_webhooks(webhooks: list, payload: dict) -> None:
     if not webhooks:
         return
@@ -42,9 +49,7 @@ def fire_webhooks(webhooks: list, payload: dict) -> None:
 
         url = str(webhook.url)
         timeout_s = getattr(webhook, "timeout_s", 10)
-        req = urllib.request.Request(url, data=data, method="POST")
-        req.add_header("Content-Type", "application/json")
         try:
-            urllib.request.urlopen(req, timeout=timeout_s)
+            _post_webhook(url, data, timeout_s)
         except Exception as exc:
             log.warning("webhook delivery failed %s -> %s %s: %s", from_col, to_col, url, exc)

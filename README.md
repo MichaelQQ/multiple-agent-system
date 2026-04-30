@@ -190,6 +190,56 @@ Each delivery is a JSON POST with these fields:
 
 Delivery is best-effort and non-blocking. Non-2xx responses, timeouts, and connection errors are caught and logged at `WARNING` level; they never block the tick loop.
 
+#### `mas webhooks test`
+
+Send a synthetic test payload to your configured webhooks without waiting for a real board transition:
+
+```sh
+mas webhooks test                                        # ping all configured webhooks
+mas webhooks test --url https://hooks.example.com/mas   # test a specific URL only
+mas webhooks test --event done                           # check event filter for "done"
+mas webhooks test --timeout-s 5                          # override per-webhook timeout
+```
+
+Flags:
+
+| Flag | Description |
+|---|---|
+| `--url <url>` | Only test the webhook with this exact URL; exit 2 if not found in config |
+| `--event <name>` | Event name used to evaluate each webhook's `events` filter (default: `test`) |
+| `--timeout-s <secs>` | Override the per-webhook `timeout_s` for this test run |
+
+The synthetic payload has exactly these 10 fields — identical to a live delivery, with `_synthetic: true` added so receivers can ignore test pings:
+
+| Field | Example value |
+|---|---|
+| `task_id` | `webhook-test-a1b2c3d4` |
+| `role` | `proposer` |
+| `goal` | `mas webhooks test synthetic event` |
+| `from` | `proposed` |
+| `to` | `doing` |
+| `summary` | `synthetic test event from \`mas webhooks test\`` |
+| `status` | `success` |
+| `timestamp` | ISO-8601 UTC (current time) |
+| `task_dir` | Absolute path to `.mas/tasks/proposed` |
+| `_synthetic` | `true` |
+
+Results are printed as a Rich table. Webhooks whose `events` filter does not match `--event` are shown as `skipped` and do not affect the exit code:
+
+```
+ URL                                Event filter  Result  Latency  Detail
+ https://hooks.example.com/mas      done, failed  2xx     42ms
+ https://other.example.com/mas      done          skipped
+```
+
+Exit codes:
+
+| Exit | Meaning |
+|---|---|
+| 0 | All tested webhooks returned 2xx |
+| 1 | At least one webhook returned non-2xx, timed out, or errored |
+| 2 | `--url` given but no matching webhook found in config |
+
 ### Validation
 
 `mas validate` checks:
