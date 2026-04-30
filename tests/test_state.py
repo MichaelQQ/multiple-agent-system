@@ -138,6 +138,48 @@ def test_update_from_evaluator_pass_captures_sha(tmp_path: Path, git_repo: Path)
     assert s.last_known_green_sha == expected
 
 
+def test_update_from_evaluator_pass_tags_green_cycle_zero(tmp_path: Path, git_repo: Path):
+    """Initial evaluator pass tags HEAD as mas/{task_id}/green-0."""
+    parent_dir = tmp_path / "task-foo"
+    parent_dir.mkdir()
+    spec = SubtaskSpec(id="e-1", role="evaluator", goal="eval")
+    r = Result(task_id="x", status="success", summary="ok", verdict="pass")
+    s = update_state_from_result(parent_dir, spec, r, worktree=git_repo)
+    tag = subprocess.run(
+        ["git", "-C", str(git_repo), "rev-parse", "refs/tags/mas/task-foo/green-0"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    assert s.last_known_green_sha == tag
+
+
+def test_update_from_evaluator_pass_tags_green_revision_cycle(tmp_path: Path, git_repo: Path):
+    """Revision-cycle evaluator pass tags HEAD as mas/{task_id}/green-N."""
+    parent_dir = tmp_path / "task-bar"
+    parent_dir.mkdir()
+    spec = SubtaskSpec(id="rev-2-evaluator", role="evaluator", goal="eval rev 2")
+    r = Result(task_id="x", status="success", summary="ok", verdict="pass")
+    update_state_from_result(parent_dir, spec, r, worktree=git_repo)
+    tag = subprocess.run(
+        ["git", "-C", str(git_repo), "rev-parse", "refs/tags/mas/task-bar/green-2"],
+        capture_output=True, text=True, check=True,
+    )
+    assert tag.returncode == 0
+
+
+def test_update_evaluator_needs_revision_does_not_tag(tmp_path: Path, git_repo: Path):
+    """Tag is only created on `pass`, not on needs_revision."""
+    parent_dir = tmp_path / "task-baz"
+    parent_dir.mkdir()
+    spec = SubtaskSpec(id="e-1", role="evaluator", goal="eval")
+    r = Result(task_id="x", status="success", summary="ok", verdict="needs_revision")
+    update_state_from_result(parent_dir, spec, r, worktree=git_repo)
+    r2 = subprocess.run(
+        ["git", "-C", str(git_repo), "rev-parse", "--verify", "refs/tags/mas/task-baz/green-0"],
+        capture_output=True, text=True, check=False,
+    )
+    assert r2.returncode != 0
+
+
 def test_update_accumulates_across_completions(tmp_path: Path):
     """Successive updates merge — files dedupe, attempts append."""
     spec_t = SubtaskSpec(id="t-1", role="tester", goal="t")

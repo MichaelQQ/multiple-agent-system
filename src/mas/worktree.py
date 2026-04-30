@@ -66,6 +66,35 @@ def commit_changes(worktree_path: Path, message: str) -> bool:
     return True
 
 
+def green_tag_name(task_id: str, cycle: int) -> str:
+    return f"mas/{task_id}/green-{cycle}"
+
+
+def tag_green(worktree_path: Path, task_id: str, cycle: int) -> str | None:
+    """Snapshot the worktree on green: commit pending changes, then tag HEAD as
+    `mas/{task_id}/green-{cycle}`. Idempotent — if the tag exists, returns the
+    existing SHA without retagging. Returns None on failure."""
+    tag = green_tag_name(task_id, cycle)
+    existing = _git(worktree_path, "rev-parse", "--verify", f"refs/tags/{tag}", check=False)
+    if existing.returncode == 0:
+        return (existing.stdout.strip() or None)
+
+    commit_changes(worktree_path, f"[{tag}]")
+
+    create = _git(worktree_path, "tag", tag, check=False)
+    if create.returncode != 0:
+        log.warning("tag_green failed", extra={"tag": tag, "stderr": create.stderr.strip()})
+        return None
+
+    head = _git(worktree_path, "rev-parse", "HEAD", check=False)
+    if head.returncode != 0:
+        return None
+    sha = head.stdout.strip() or None
+    if sha:
+        log.info("tagged green snapshot", extra={"tag": tag, "sha": sha})
+    return sha
+
+
 def prune(repo: Path, worktree_path: Path, *, keep_branch: bool = True) -> None:
     branch = branch_name(worktree_path.name)
     if worktree_path.exists():

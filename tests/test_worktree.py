@@ -201,6 +201,64 @@ class TestCommitChanges:
         assert "to_delete.txt" in result.stdout
 
 
+class TestTagGreen:
+    """Test tag_green function."""
+
+    def test_tag_green_creates_tag_at_head(self, git_repo, tmp_path):
+        worktree_path = tmp_path / "worktrees" / "task-1"
+        wt.create(git_repo, "task-1", worktree_path)
+        head = subprocess.run(
+            ["git", "-C", str(worktree_path), "rev-parse", "HEAD"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        sha = wt.tag_green(worktree_path, "task-1", 0)
+        assert sha == head
+        result = subprocess.run(
+            ["git", "-C", str(worktree_path), "rev-parse", "refs/tags/mas/task-1/green-0"],
+            capture_output=True, text=True, check=True,
+        )
+        assert result.stdout.strip() == head
+
+    def test_tag_green_commits_pending_changes_first(self, git_repo, tmp_path):
+        worktree_path = tmp_path / "worktrees" / "task-2"
+        wt.create(git_repo, "task-2", worktree_path)
+        before = subprocess.run(
+            ["git", "-C", str(worktree_path), "rev-parse", "HEAD"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        (worktree_path / "new.py").write_text("x = 1\n")
+        sha = wt.tag_green(worktree_path, "task-2", 1)
+        assert sha is not None
+        assert sha != before  # commit was made
+        files = subprocess.run(
+            ["git", "-C", str(worktree_path), "show", "--name-only", "--format=", sha],
+            capture_output=True, text=True, check=True,
+        ).stdout
+        assert "new.py" in files
+
+    def test_tag_green_idempotent(self, git_repo, tmp_path):
+        worktree_path = tmp_path / "worktrees" / "task-3"
+        wt.create(git_repo, "task-3", worktree_path)
+        sha1 = wt.tag_green(worktree_path, "task-3", 0)
+        sha2 = wt.tag_green(worktree_path, "task-3", 0)
+        assert sha1 == sha2
+
+    def test_tag_green_distinct_cycles(self, git_repo, tmp_path):
+        worktree_path = tmp_path / "worktrees" / "task-4"
+        wt.create(git_repo, "task-4", worktree_path)
+        sha0 = wt.tag_green(worktree_path, "task-4", 0)
+        (worktree_path / "rev1.py").write_text("y = 2\n")
+        sha1 = wt.tag_green(worktree_path, "task-4", 1)
+        assert sha0 != sha1
+        for cycle, expected in ((0, sha0), (1, sha1)):
+            r = subprocess.run(
+                ["git", "-C", str(worktree_path), "rev-parse",
+                 f"refs/tags/mas/task-4/green-{cycle}"],
+                capture_output=True, text=True, check=True,
+            )
+            assert r.stdout.strip() == expected
+
+
 class TestPrune:
     """Test prune function."""
 

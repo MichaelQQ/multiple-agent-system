@@ -65,6 +65,16 @@ def _extend_unique(seq: list[str], items: list[str]) -> None:
             existing.add(it)
 
 
+def _cycle_from_spec_id(spec_id: str) -> int:
+    """Initial cycle = 0. Revision subtasks `rev-N-...` → cycle N."""
+    if spec_id.startswith("rev-"):
+        try:
+            return int(spec_id.split("-", 2)[1])
+        except (IndexError, ValueError):
+            return 0
+    return 0
+
+
 def _git_head_sha(worktree: Path) -> str | None:
     try:
         r = subprocess.run(
@@ -113,7 +123,11 @@ def update_state_from_result(
         and result.verdict == "pass"
         and worktree is not None
     ):
-        sha = _git_head_sha(worktree)
+        from . import worktree as _wt
+        cycle = _cycle_from_spec_id(spec.id)
+        sha = _wt.tag_green(worktree, parent_dir.name, cycle)
+        if sha is None:
+            sha = _git_head_sha(worktree)
         if sha:
             state.last_known_green_sha = sha
 
