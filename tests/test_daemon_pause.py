@@ -56,7 +56,9 @@ def _setup_mas(tmp_path: Path) -> Path:
     for role in ("proposer", "orchestrator", "implementer", "tester", "evaluator"):
         (mas / "prompts" / f"{role}.md").write_text("goal=$goal")
     (mas / "config.yaml").write_text(
-        "providers:\n  mock:\n    cli: sh\n    max_concurrent: 2\n    extra_args: []\n"
+        "providers:\n"
+        "  mock:\n    cli: sh\n    max_concurrent: 2\n    extra_args: []\n"
+        "  mock2:\n    cli: sh\n    max_concurrent: 2\n    extra_args: []\n"
     )
     (mas / "roles.yaml").write_text(
         "roles:\n"
@@ -64,7 +66,7 @@ def _setup_mas(tmp_path: Path) -> Path:
         "  orchestrator: {provider: mock}\n"
         "  implementer: {provider: mock}\n"
         "  tester: {provider: mock}\n"
-        "  evaluator: {provider: mock}\n"
+        "  evaluator: {provider: mock2}\n"
     )
     return mas
 

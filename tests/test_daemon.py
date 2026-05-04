@@ -35,6 +35,10 @@ def mas(tmp_path: Path) -> Path:
         "    cli: sh\n"
         "    max_concurrent: 1\n"
         "    extra_args: []\n"
+        "  mock2:\n"
+        "    cli: sh\n"
+        "    max_concurrent: 1\n"
+        "    extra_args: []\n"
     )
     (d / "roles.yaml").write_text(
         "roles:\n"
@@ -42,7 +46,7 @@ def mas(tmp_path: Path) -> Path:
         "  orchestrator: {provider: mock}\n"
         "  implementer: {provider: mock}\n"
         "  tester: {provider: mock}\n"
-        "  evaluator: {provider: mock}\n"
+        "  evaluator: {provider: mock2}\n"
     )
     for role in ("proposer", "orchestrator", "implementer", "tester", "evaluator"):
         (d / "prompts" / f"{role}.md").write_text("goal=$goal")

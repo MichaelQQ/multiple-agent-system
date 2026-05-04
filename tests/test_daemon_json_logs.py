@@ -57,6 +57,10 @@ def mas_dir(tmp_path: Path) -> Path:
         "    cli: sh\n"
         "    max_concurrent: 1\n"
         "    extra_args: []\n"
+        "  mock2:\n"
+        "    cli: sh\n"
+        "    max_concurrent: 1\n"
+        "    extra_args: []\n"
     )
     (mas / "roles.yaml").write_text(
         "roles:\n"
@@ -64,7 +68,7 @@ def mas_dir(tmp_path: Path) -> Path:
         "  orchestrator: {provider: mock}\n"
         "  implementer: {provider: mock}\n"
         "  tester: {provider: mock}\n"
-        "  evaluator: {provider: mock}\n"
+        "  evaluator: {provider: mock2}\n"
     )
     return mas
 

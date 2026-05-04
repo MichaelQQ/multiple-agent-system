@@ -58,6 +58,9 @@ def _setup_clean_mas(mas_dir: Path) -> None:
         "  claude-code:\n"
         "    cli: claude\n"
         "    max_concurrent: 1\n"
+        "  ollama:\n"
+        "    cli: ollama\n"
+        "    max_concurrent: 1\n"
     )
     (mas_dir / "roles.yaml").write_text(
         "roles:\n"
@@ -70,7 +73,7 @@ def _setup_clean_mas(mas_dir: Path) -> None:
         "  tester:\n"
         "    provider: claude-code\n"
         "  evaluator:\n"
-        "    provider: claude-code\n"
+        "    provider: ollama\n"
     )
     prompts_dir = mas_dir / "prompts"
     prompts_dir.mkdir(exist_ok=True)

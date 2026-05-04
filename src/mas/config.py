@@ -116,6 +116,31 @@ def _validate_cross_field_constraints(config: MasConfig) -> None:
             lines.append(f"    Available providers: {list(config.providers.keys())}")
         raise ConfigValidationError(message="\n".join(lines), errors=errors)
 
+    impl = config.roles.get("implementer")
+    evaluator = config.roles.get("evaluator")
+    if (
+        impl is not None
+        and evaluator is not None
+        and impl.provider == evaluator.provider
+        and impl.model == evaluator.model
+    ):
+        impl_id = f"{impl.provider}/{impl.model}" if impl.model else impl.provider
+        eval_id = f"{evaluator.provider}/{evaluator.model}" if evaluator.model else evaluator.provider
+        msg = (
+            f"Evaluator '{eval_id}' must differ from implementer '{impl_id}' "
+            f"(by provider or model) to prevent same-model self-validation"
+        )
+        diversity_errors = [{
+            "field": "roles.evaluator.provider",
+            "message": msg,
+            "input": evaluator.provider,
+        }]
+        lines = ["Configuration validation failed:"]
+        lines.append(f"  - Field 'roles.evaluator.provider': {msg}")
+        lines.append(f"    Received: {eval_id}")
+        lines.append(f"    Implementer: {impl_id}")
+        raise ConfigValidationError(message="\n".join(lines), errors=diversity_errors)
+
 
 def _config_has_content(cfg: MasConfig) -> bool:
     return bool(cfg.providers and cfg.roles)

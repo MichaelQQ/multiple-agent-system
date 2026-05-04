@@ -46,6 +46,10 @@ def mas(tmp_path: Path) -> Path:
             "    cli: sh\n"
             "    max_concurrent: 1\n"
             "    extra_args: []\n"
+            "  mock2:\n"
+            "    cli: sh\n"
+            "    max_concurrent: 1\n"
+            "    extra_args: []\n"
         )
         (d / "roles.yaml").write_text(
             "roles:\n"
@@ -53,7 +57,7 @@ def mas(tmp_path: Path) -> Path:
             "  orchestrator: {provider: mock}\n"
             "  implementer: {provider: mock}\n"
             "  tester: {provider: mock}\n"
-            "  evaluator: {provider: mock}\n"
+            "  evaluator: {provider: mock2}\n"
         )
         for role in ("proposer", "orchestrator", "implementer", "tester", "evaluator"):
             (d / "prompts" / f"{role}.md").write_text("goal=$goal")
@@ -104,7 +108,7 @@ class TestDaemonConfigReload:
     def test_successful_reload_applies_new_config(self, mas):
         """When config.yaml is modified with valid content, daemon reloads it."""
         _check_reload_config = _LazyCheckReload.get()
-        
+
         old_config = load_config(mas)
         assert old_config.providers["mock"].max_concurrent == 1
 
@@ -113,6 +117,10 @@ class TestDaemonConfigReload:
             "  mock:\n"
             "    cli: sh\n"
             "    max_concurrent: 2\n"
+            "    extra_args: []\n"
+            "  mock2:\n"
+            "    cli: sh\n"
+            "    max_concurrent: 1\n"
             "    extra_args: []\n"
         )
 
@@ -124,7 +132,7 @@ class TestDaemonConfigReload:
     def test_reload_log_includes_changed_settings(self, mas):
         """Log output includes which settings changed (e.g. provider max_concurrent)."""
         _check_reload_config = _LazyCheckReload.get()
-        
+
         old_config = load_config(mas)
 
         (mas / "config.yaml").write_text(
@@ -132,6 +140,10 @@ class TestDaemonConfigReload:
             "  mock:\n"
             "    cli: sh\n"
             "    max_concurrent: 2\n"
+            "    extra_args: []\n"
+            "  mock2:\n"
+            "    cli: sh\n"
+            "    max_concurrent: 1\n"
             "    extra_args: []\n"
         )
 

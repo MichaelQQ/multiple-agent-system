@@ -158,6 +158,57 @@ class TestRoleReferenceUnknownProvider:
         assert "proposer" in str(err)
 
 
+class TestProviderDiversityRule:
+    def _cfg_with_eval(self, evaluator_provider: str) -> dict:
+        cfg = copy.deepcopy(VALID_CONFIG)
+        cfg["roles"]["evaluator"] = {
+            "provider": evaluator_provider,
+            "timeout_s": 600,
+            "max_retries": 1,
+        }
+        return cfg
+
+    def test_same_provider_for_implementer_and_evaluator_raises(self, mas_dir, monkeypatch):
+        cfg = self._cfg_with_eval("opencode")  # implementer is also "opencode"
+        write_yaml(mas_dir / "config.yaml", cfg)
+        write_yaml(mas_dir / "roles.yaml", {"roles": cfg["roles"]})
+        monkeypatch.chdir(mas_dir.parent)
+        with pytest.raises(ConfigValidationError) as exc_info:
+            load_config(project=mas_dir)
+        err = str(exc_info.value)
+        assert "evaluator" in err.lower()
+        assert "implementer" in err.lower()
+        assert "opencode" in err
+
+    def test_different_provider_for_implementer_and_evaluator_passes(self, mas_dir, monkeypatch):
+        cfg = self._cfg_with_eval("claude-code")  # implementer is "opencode"
+        write_yaml(mas_dir / "config.yaml", cfg)
+        write_yaml(mas_dir / "roles.yaml", {"roles": cfg["roles"]})
+        monkeypatch.chdir(mas_dir.parent)
+        config = load_config(project=mas_dir)
+        assert config.roles["implementer"].provider != config.roles["evaluator"].provider
+
+    def test_missing_implementer_skips_diversity_check(self, mas_dir, monkeypatch):
+        cfg = copy.deepcopy(VALID_CONFIG)
+        cfg["roles"] = {
+            "proposer": {"provider": "claude-code"},
+            "evaluator": {"provider": "claude-code"},
+        }
+        write_yaml(mas_dir / "config.yaml", cfg)
+        write_yaml(mas_dir / "roles.yaml", {"roles": cfg["roles"]})
+        monkeypatch.chdir(mas_dir.parent)
+        load_config(project=mas_dir)
+
+    def test_error_field_path_targets_evaluator(self, mas_dir, monkeypatch):
+        cfg = self._cfg_with_eval("opencode")
+        write_yaml(mas_dir / "config.yaml", cfg)
+        write_yaml(mas_dir / "roles.yaml", {"roles": cfg["roles"]})
+        monkeypatch.chdir(mas_dir.parent)
+        with pytest.raises(ConfigValidationError) as exc_info:
+            load_config(project=mas_dir)
+        assert any(e["field"] == "roles.evaluator.provider" for e in exc_info.value.errors)
+
+
 class TestErrorMessages:
     def test_error_contains_field_path(self, mas_dir, monkeypatch):
         cfg = copy.deepcopy(VALID_CONFIG)

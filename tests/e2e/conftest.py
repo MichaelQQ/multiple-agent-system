@@ -10,9 +10,12 @@ import pytest
 import yaml
 
 from mas import board
+from mas.adapters import REGISTRY, ScriptAdapter
 from mas.schemas import MasConfig, Plan, ProviderConfig, RoleConfig, SubtaskSpec, Task
 
 SCRIPT_DIR = Path(__file__).parent / "scripts"
+
+REGISTRY.setdefault("script_eval", ScriptAdapter)
 
 
 @pytest.fixture
@@ -60,6 +63,11 @@ def mas_dir(tmp_path, git_repo):
                 "max_concurrent": 5,
                 "extra_args": [script_proposer],
             },
+            "script_eval": {
+                "cli": "/bin/bash",
+                "max_concurrent": 5,
+                "extra_args": [script_evaluator],
+            },
             "mock": {
                 "cli": "sh",
                 "max_concurrent": 2,
@@ -71,7 +79,7 @@ def mas_dir(tmp_path, git_repo):
             "orchestrator": {"provider": "script", "max_retries": 1, "extra_args": [script_orchestrator]},
             "implementer": {"provider": "script", "max_retries": 1, "extra_args": [script_implementer]},
             "tester": {"provider": "script", "max_retries": 1, "extra_args": [script_tester]},
-            "evaluator": {"provider": "script", "max_retries": 1, "extra_args": [script_evaluator]},
+            "evaluator": {"provider": "script_eval", "max_retries": 1, "extra_args": [script_evaluator]},
         },
         "max_proposed": 10,
     }

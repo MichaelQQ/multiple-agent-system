@@ -94,7 +94,7 @@ Effort: S (trace) + M (patterns).
 - [x] **9.** Convergence detector: Jaccard similarity on cycle-N vs cycle-(N-1) feedback (gap 4)
 - [x] **10.** `subtask.constraints.allowed_paths` post-hoc enforcement via `git diff --name-only` (gap 5)
 - [x] **11.** `mas verify <task_id>` CLI: re-run recorded `test_command` and audit (gap 5)
-- [ ] **12.** Provider diversity rule: validate `evaluator.provider != implementer.provider` (gap 3)
+- [x] **12.** Provider diversity rule: validate `evaluator.provider != implementer.provider` (gap 3)
 - [ ] **13.** Optional `arbiter` role for structured disagreement resolution (gap 3)
 - [ ] **14.** Optional N-of-M evaluator quorum (`roles.evaluator.quorum: 2`) (gap 1)
 - [ ] **15.** `graph.json` task graph replacing flat `prior_results` (gap 2)
