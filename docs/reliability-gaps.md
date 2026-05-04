@@ -96,7 +96,7 @@ Effort: S (trace) + M (patterns).
 - [x] **11.** `mas verify <task_id>` CLI: re-run recorded `test_command` and audit (gap 5)
 - [x] **12.** Provider diversity rule: validate `evaluator.provider != implementer.provider` (gap 3)
 - [x] **13.** Optional `arbiter` role for structured disagreement resolution (gap 3)
-- [ ] **14.** Optional N-of-M evaluator quorum (`roles.evaluator.quorum: 2`) (gap 1)
+- [x] **14.** Optional N-of-M evaluator quorum (`roles.evaluator.quorum: 2`) (gap 1)
 - [ ] **15.** `graph.json` task graph replacing flat `prior_results` (gap 2)
 - [ ] **16.** Hierarchical summary for parents with >5 done subtasks (gap 6)
 - [ ] **17.** Extend `trace.py` → `mas trace <task_id>` rendering graph + transitions + cost (gap 7)

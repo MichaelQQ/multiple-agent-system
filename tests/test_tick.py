@@ -2567,3 +2567,242 @@ def test_arbiter_not_dispatched_twice(tmp_path: Path):
 
     refreshed = parse_plan(parent / "plan.json", "20260504-p-arb7-aaaa")
     assert sum(1 for s in refreshed.subtasks if s.role == "arbiter") == 1
+
+
+# ---------------------------------------------------------------------------
+# Evaluator quorum (gap 1 / TODO #14)
+# ---------------------------------------------------------------------------
+
+def _cfg_with_quorum(n: int = 2) -> MasConfig:
+    """Cfg matching `_cfg()` with `roles.evaluator.quorum = n`."""
+    return MasConfig(
+        providers={"mock": ProviderConfig(cli="sh", max_concurrent=2, extra_args=[])},
+        roles={
+            "proposer": RoleConfig(provider="mock"),
+            "orchestrator": RoleConfig(provider="mock"),
+            "implementer": RoleConfig(provider="mock"),
+            "tester": RoleConfig(provider="mock"),
+            "evaluator": RoleConfig(provider="mock", quorum=n),
+        },
+        max_proposed=10,
+        proposal_similarity_threshold=0.7,
+    )
+
+
+def test_quorum_field_default_is_one():
+    """Quorum defaults to 1 (single evaluator) so existing configs are unchanged."""
+    cfg = _cfg()
+    assert cfg.roles["evaluator"].quorum == 1
+
+
+def test_quorum_field_rejects_zero():
+    """quorum < 1 is invalid — Pydantic must reject it."""
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        RoleConfig(provider="mock", quorum=0)
+
+
+def test_expand_evaluator_quorum_noop_when_quorum_one():
+    """quorum=1 leaves the plan unchanged."""
+    from mas.tick import _expand_evaluator_quorum
+
+    plan = Plan(
+        parent_id="p", summary="s",
+        subtasks=[
+            SubtaskSpec(id="impl-1", role="implementer", goal="i"),
+            SubtaskSpec(id="eval-1", role="evaluator", goal="e"),
+        ],
+    )
+    changed = _expand_evaluator_quorum(plan, _cfg())
+    assert changed is False
+    assert [s.id for s in plan.subtasks] == ["impl-1", "eval-1"]
+
+
+def test_expand_evaluator_quorum_expands_to_n_siblings():
+    """quorum=3 expands a single eval-1 into eval-1-q1, eval-1-q2, eval-1-q3."""
+    from mas.tick import _expand_evaluator_quorum
+
+    plan = Plan(
+        parent_id="p", summary="s",
+        subtasks=[
+            SubtaskSpec(id="impl-1", role="implementer", goal="i"),
+            SubtaskSpec(id="eval-1", role="evaluator", goal="e"),
+        ],
+    )
+    changed = _expand_evaluator_quorum(plan, _cfg_with_quorum(3))
+    assert changed is True
+    assert [s.id for s in plan.subtasks] == [
+        "impl-1", "eval-1-q1", "eval-1-q2", "eval-1-q3",
+    ]
+    # Other fields preserved on each clone.
+    for s in plan.subtasks[1:]:
+        assert s.role == "evaluator"
+        assert s.goal == "e"
+
+
+def test_expand_evaluator_quorum_idempotent():
+    """Re-expanding an already-expanded plan must not double-expand."""
+    from mas.tick import _expand_evaluator_quorum
+
+    plan = Plan(
+        parent_id="p", summary="s",
+        subtasks=[
+            SubtaskSpec(id="eval-1-q1", role="evaluator", goal="e"),
+            SubtaskSpec(id="eval-1-q2", role="evaluator", goal="e"),
+        ],
+    )
+    changed = _expand_evaluator_quorum(plan, _cfg_with_quorum(2))
+    assert changed is False
+    assert len(plan.subtasks) == 2
+
+
+def _seed_quorum_parent(tmp_path: Path, parent_id: str, quorum: int = 2) -> tuple[Path, Plan, Path]:
+    """Set up a parent with one tester+implementer already passing and a
+    quorum of evaluators ready to be aggregated."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent = board.task_dir(mas, "doing", parent_id)
+    parent.mkdir(parents=True)
+    board.write_task(parent, Task(id=parent_id, role="orchestrator", goal="g"))
+    subtasks = parent / "subtasks"
+    subtasks.mkdir()
+
+    eval_specs = [
+        SubtaskSpec(id=f"eval-1-q{i}", role="evaluator", goal="e")
+        for i in range(1, quorum + 1)
+    ]
+    plan = Plan(
+        parent_id=parent_id, summary="s",
+        subtasks=[
+            SubtaskSpec(id="test-1", role="tester", goal="t"),
+            SubtaskSpec(id="impl-1", role="implementer", goal="i"),
+            *eval_specs,
+        ],
+        max_revision_cycles=2,
+    )
+    (parent / "plan.json").write_text(plan.model_dump_json())
+
+    for sid in ("test-1", "impl-1"):
+        d = subtasks / sid
+        d.mkdir()
+        (d / "result.json").write_text(
+            Result(task_id=sid, status="success", summary="ok").model_dump_json()
+        )
+    return parent, plan, mas
+
+
+def _write_eval_result(parent: Path, sid: str, *, verdict: str, feedback: str = "") -> Result:
+    d = parent / "subtasks" / sid
+    d.mkdir(exist_ok=True)
+    status = "success" if verdict == "pass" else "needs_revision"
+    r = Result(
+        task_id=sid, status=status, summary=f"{sid} verdict",
+        verdict=verdict, feedback=feedback,
+    )
+    (d / "result.json").write_text(r.model_dump_json())
+    return r
+
+
+def test_quorum_defers_until_all_siblings_complete(tmp_path: Path):
+    """When only one quorum sibling has finished, _handle_child_result must
+    not append a revision cycle — the merger waits for the second sibling."""
+    parent, plan, mas = _seed_quorum_parent(tmp_path, "20260504-quor1-aaaa")
+    # Only q1 has a result (pass); q2 is pending.
+    r1 = _write_eval_result(parent, "eval-1-q1", verdict="pass")
+
+    spec = next(s for s in plan.subtasks if s.id == "eval-1-q1")
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg_with_quorum(2))
+    _handle_child_result(env, parent, board.read_task(parent), plan, spec, r1)
+
+    refreshed = parse_plan(parent / "plan.json", "20260504-quor1-aaaa")
+    assert not any(s.id.startswith("rev-") for s in refreshed.subtasks)
+    assert parent.exists(), "parent must remain in doing/ until quorum completes"
+
+
+def test_quorum_unanimous_pass_does_not_revise(tmp_path: Path):
+    """All quorum members pass → no revision cycle, parent eligible to finalize."""
+    parent, plan, mas = _seed_quorum_parent(tmp_path, "20260504-quor2-aaaa")
+    _write_eval_result(parent, "eval-1-q1", verdict="pass")
+    r2 = _write_eval_result(parent, "eval-1-q2", verdict="pass")
+
+    spec = next(s for s in plan.subtasks if s.id == "eval-1-q2")
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg_with_quorum(2))
+    _handle_child_result(env, parent, board.read_task(parent), plan, spec, r2)
+
+    refreshed = parse_plan(parent / "plan.json", "20260504-quor2-aaaa")
+    assert not any(s.id.startswith("rev-") for s in refreshed.subtasks)
+    # Both quorum members are individually verdict=pass, so all_children_passed True.
+    assert _all_children_passed(refreshed, parent / "subtasks") is True
+
+
+def test_quorum_dissent_appends_revision_with_merged_feedback(tmp_path: Path):
+    """One pass + one needs_revision → consensus is needs_revision, a revision
+    cycle is appended, and the recorded feedback merges both sibling messages."""
+    parent, plan, mas = _seed_quorum_parent(tmp_path, "20260504-quor3-aaaa")
+    _write_eval_result(parent, "eval-1-q1", verdict="pass", feedback="looks good")
+    r2 = _write_eval_result(
+        parent, "eval-1-q2", verdict="needs_revision", feedback="missing test for X",
+    )
+
+    spec = next(s for s in plan.subtasks if s.id == "eval-1-q2")
+    cfg = _cfg_with_quorum(2)
+    cfg.max_replans = 0  # keep test scoped to append-cycle path
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=cfg)
+    _handle_child_result(env, parent, board.read_task(parent), plan, spec, r2)
+
+    refreshed = parse_plan(parent / "plan.json", "20260504-quor3-aaaa")
+    rev_specs = [s for s in refreshed.subtasks if s.id.startswith("rev-1-")]
+    assert rev_specs, "revision cycle must be appended on quorum dissent"
+    merged = refreshed.revision_feedback["rev-1"]
+    assert "eval-1-q1" in merged and "looks good" in merged
+    assert "eval-1-q2" in merged and "missing test for X" in merged
+
+
+def test_quorum_revision_cycle_evaluator_also_expanded(tmp_path: Path):
+    """When a revision cycle is appended under quorum config, the new
+    `rev-1-evaluator` subtask must itself be expanded into N quorum members."""
+    parent, plan, mas = _seed_quorum_parent(tmp_path, "20260504-quor4-aaaa")
+    _write_eval_result(parent, "eval-1-q1", verdict="pass")
+    r2 = _write_eval_result(
+        parent, "eval-1-q2", verdict="needs_revision", feedback="X missing",
+    )
+
+    spec = next(s for s in plan.subtasks if s.id == "eval-1-q2")
+    cfg = _cfg_with_quorum(2)
+    cfg.max_replans = 0
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=cfg)
+    _handle_child_result(env, parent, board.read_task(parent), plan, spec, r2)
+
+    refreshed = parse_plan(parent / "plan.json", "20260504-quor4-aaaa")
+    rev_evals = [s for s in refreshed.subtasks if s.role == "evaluator" and s.id.startswith("rev-1-")]
+    assert {s.id for s in rev_evals} == {"rev-1-evaluator-q1", "rev-1-evaluator-q2"}
+
+
+def test_advance_one_expands_orchestrator_plan(tmp_path: Path):
+    """Plan written by an orchestrator with a single evaluator gets expanded
+    in-place by _advance_one before any subtask is dispatched."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent_id = "20260504-quor5-aaaa"
+    parent = board.task_dir(mas, "doing", parent_id)
+    parent.mkdir(parents=True)
+    board.write_task(parent, Task(id=parent_id, role="orchestrator", goal="g"))
+    (parent / "worktree").mkdir()
+    plan = Plan(
+        parent_id=parent_id, summary="s",
+        subtasks=[
+            SubtaskSpec(id="impl-1", role="implementer", goal="i"),
+            SubtaskSpec(id="eval-1", role="evaluator", goal="e"),
+        ],
+    )
+    (parent / "plan.json").write_text(plan.model_dump_json())
+
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg_with_quorum(2))
+    # Patch dispatch so we don't actually launch a subprocess.
+    with patch("mas.tick._dispatch_role", return_value=None):
+        _advance_one(env, parent)
+
+    refreshed = parse_plan(parent / "plan.json", parent_id)
+    assert [s.id for s in refreshed.subtasks] == [
+        "impl-1", "eval-1-q1", "eval-1-q2",
+    ]

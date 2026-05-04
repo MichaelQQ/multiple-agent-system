@@ -234,6 +234,8 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
         return
 
     plan = parse_plan(plan_path, parent_task.id)
+    if _expand_evaluator_quorum(plan, env.cfg):
+        plan_path.write_text(plan.model_dump_json(indent=2))
     subtasks_root = parent_dir / "subtasks"
     subtasks_root.mkdir(exist_ok=True)
 
@@ -546,6 +548,16 @@ def _handle_child_result(env, parent_dir, parent_task, plan, spec, result):
         duration_s=result.duration_s,
         summary=result.summary,
     )
+
+    # Evaluator quorum: defer until all sibling members complete, then
+    # replace `result` with the merged consensus so the existing pass /
+    # needs_revision branches see the quorum's collective verdict.
+    if spec.role == "evaluator" and _quorum_base_id(spec.id) is not None:
+        merged = _aggregate_quorum_result(plan, parent_dir, spec)
+        if merged is None:
+            return
+        result = merged
+
     child_dir = parent_dir / "subtasks" / spec.id
     txns = transitions.read_transitions(child_dir, limit=3)
     if txns:
@@ -578,7 +590,9 @@ def _handle_child_result(env, parent_dir, parent_task, plan, spec, result):
         if _should_trigger_replan(plan, parent_dir, env.cfg.max_replans):
             _trigger_replan(env, parent_dir, parent_task, reason=feedback)
             return
-        appended = _append_revision_cycle(parent_dir, plan, parent_task, feedback=feedback)
+        appended = _append_revision_cycle(
+            parent_dir, plan, parent_task, feedback=feedback, cfg=env.cfg
+        )
         if not appended:
             failed_dir = env.mas / "tasks" / "failed" / parent_task.id
             board.move(parent_dir, failed_dir, reason="revision_cycles_exhausted")
@@ -807,7 +821,9 @@ def _append_arbiter_subtask(
     (parent_dir / "plan.json").write_text(plan.model_dump_json(indent=2))
 
 
-def _append_revision_cycle(parent_dir: Path, plan: Plan, parent_task, feedback: str) -> bool:
+def _append_revision_cycle(
+    parent_dir: Path, plan: Plan, parent_task, feedback: str, *, cfg: MasConfig | None = None
+) -> bool:
     """Returns True if a new cycle was appended, False if max_revision_cycles was reached."""
     from .schemas import SubtaskSpec
 
@@ -829,8 +845,107 @@ def _append_revision_cycle(parent_dir: Path, plan: Plan, parent_task, feedback: 
                     goal=f"Evaluate revision {cycle_n}", inputs=ref_inputs),
     ]
     plan.subtasks.extend(new_children)
+    if cfg is not None:
+        _expand_evaluator_quorum(plan, cfg)
     (parent_dir / "plan.json").write_text(plan.model_dump_json(indent=2))
     return True
+
+
+_QUORUM_ID_RE = re.compile(r"^(.+)-q(\d+)$")
+
+
+def _quorum_base_id(spec_id: str) -> tuple[str, int] | None:
+    """If `spec_id` matches the quorum pattern `<base>-q<N>`, return
+    (base_id, N). Otherwise None."""
+    m = _QUORUM_ID_RE.match(spec_id)
+    if not m:
+        return None
+    return m.group(1), int(m.group(2))
+
+
+def _quorum_siblings(plan: Plan, base_id: str):
+    """Return all SubtaskSpec entries that are quorum members of base_id,
+    in plan order."""
+    out = []
+    for s in plan.subtasks:
+        match = _quorum_base_id(s.id)
+        if match is not None and match[0] == base_id:
+            out.append(s)
+    return out
+
+
+def _expand_evaluator_quorum(plan: Plan, cfg: MasConfig) -> bool:
+    """Expand single evaluator subtasks into N quorum siblings when
+    `roles.evaluator.quorum > 1`. Idempotent — already-expanded specs
+    (id matches `<base>-q<N>`) are left alone.
+
+    Returns True if any expansion took place."""
+    from .schemas import SubtaskSpec  # noqa: F401  (model_copy uses it via plan)
+
+    eval_role = cfg.roles.get("evaluator")
+    if eval_role is None:
+        return False
+    quorum = getattr(eval_role, "quorum", 1)
+    if quorum < 2:
+        return False
+
+    new_subtasks = []
+    changed = False
+    for spec in plan.subtasks:
+        if spec.role != "evaluator" or _quorum_base_id(spec.id) is not None:
+            new_subtasks.append(spec)
+            continue
+        for i in range(1, quorum + 1):
+            new_subtasks.append(spec.model_copy(update={"id": f"{spec.id}-q{i}"}))
+        changed = True
+
+    if changed:
+        plan.subtasks[:] = new_subtasks
+    return changed
+
+
+def _aggregate_quorum_result(plan: Plan, parent_dir: Path, spec) -> Result | None:
+    """If `spec` is an evaluator quorum member, look up its siblings and
+    return a merged consensus Result, or None if any sibling result is
+    still missing (defer until all members complete).
+
+    Consensus rule: every sibling must be status=success and verdict=pass
+    for the merged result to be a pass; otherwise the merged result is
+    needs_revision with each sibling's feedback concatenated."""
+    if spec.role != "evaluator":
+        return None
+    match = _quorum_base_id(spec.id)
+    if match is None:
+        return None
+    base_id, _idx = match
+    siblings = _quorum_siblings(plan, base_id)
+    if len(siblings) < 2:
+        return None
+    subtasks_root = parent_dir / "subtasks"
+    sibling_results = [board.read_result(subtasks_root / s.id) for s in siblings]
+    if any(r is None for r in sibling_results):
+        return None
+
+    all_pass = all(
+        r.status == "success" and r.verdict == "pass" for r in sibling_results
+    )
+    last = sibling_results[-1]
+    if all_pass:
+        return last.model_copy(update={
+            "summary": f"[quorum:pass {len(siblings)}/{len(siblings)}] {last.summary}",
+        })
+    fb_parts: list[str] = []
+    for s, r in zip(siblings, sibling_results):
+        verdict = r.verdict or r.status
+        body = (r.feedback or "").strip()
+        fb_parts.append(f"[{s.id} verdict={verdict}] {body}".rstrip())
+    merged_feedback = "\n\n".join(fb_parts)
+    return last.model_copy(update={
+        "status": "needs_revision",
+        "verdict": "needs_revision",
+        "summary": f"[quorum:dissent {len(siblings)} members] no unanimous pass",
+        "feedback": merged_feedback,
+    })
 
 
 def _resolve_feedback_ref(spec_inputs: dict, plan: Plan) -> dict:

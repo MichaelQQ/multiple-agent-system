@@ -167,6 +167,7 @@ class RoleConfig(BaseModel):
     allowed_tools: list[str] | None = None
     permission_mode: str | None = None
     extra_args: list[str] = Field(default_factory=list)
+    quorum: int = Field(default=1, ge=1)
 
 
 class ProviderConfig(BaseModel):
