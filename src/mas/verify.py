@@ -166,6 +166,171 @@ def verify_child_result(
     return result
 
 
+def audit_task_test_command(
+    parent_dir: Path,
+    *,
+    timeout_s: int = _VERIFY_RERUN_TIMEOUT_S,
+) -> list[dict]:
+    """Audit each implementer subtask under `parent_dir` by re-running its
+    declared test_command in the parent's worktree and comparing the actual
+    exit code against `handoff.final_exit_code`.
+
+    Cheap auditor — does not mutate task state. Returns one dict per
+    implementer subtask with a recorded handoff:
+      {subtask_id, role, claimed_exit_code, test_command,
+       actual_exit_code, status, detail}
+    `status` is one of: match, mismatch, skipped, error.
+    """
+    from . import board as _board
+
+    records: list[dict] = []
+    plan_path = parent_dir / "plan.json"
+    if not plan_path.exists():
+        return records
+
+    try:
+        plan = _board.read_plan(parent_dir)
+    except Exception as e:
+        return [{
+            "subtask_id": "",
+            "role": "",
+            "claimed_exit_code": None,
+            "test_command": None,
+            "actual_exit_code": None,
+            "status": "error",
+            "detail": f"could not read plan.json: {e}",
+        }]
+
+    worktree = parent_dir / "worktree"
+    subtasks_root = parent_dir / "subtasks"
+
+    for spec in plan.subtasks:
+        if spec.role != "implementer":
+            continue
+        child_dir = subtasks_root / spec.id
+        result = _board.read_result(child_dir)
+        if result is None:
+            continue
+        raw = result.handoff or {}
+        claimed = raw.get("final_exit_code")
+        if claimed is None:
+            records.append({
+                "subtask_id": spec.id,
+                "role": "implementer",
+                "claimed_exit_code": None,
+                "test_command": None,
+                "actual_exit_code": None,
+                "status": "skipped",
+                "detail": "no handoff.final_exit_code recorded",
+            })
+            continue
+
+        test_command = _resolve_test_command_from_dir(plan, spec.id, subtasks_root, result)
+        if not test_command:
+            records.append({
+                "subtask_id": spec.id,
+                "role": "implementer",
+                "claimed_exit_code": claimed,
+                "test_command": None,
+                "actual_exit_code": None,
+                "status": "skipped",
+                "detail": "no test_command found in implementer or prior tester handoff",
+            })
+            continue
+        if not worktree.is_dir():
+            records.append({
+                "subtask_id": spec.id,
+                "role": "implementer",
+                "claimed_exit_code": claimed,
+                "test_command": test_command,
+                "actual_exit_code": None,
+                "status": "error",
+                "detail": f"worktree missing at {worktree} (likely pruned)",
+            })
+            continue
+
+        try:
+            proc = subprocess.run(
+                test_command,
+                shell=True,
+                cwd=str(worktree),
+                capture_output=True,
+                text=True,
+                timeout=timeout_s,
+            )
+        except subprocess.TimeoutExpired:
+            records.append({
+                "subtask_id": spec.id,
+                "role": "implementer",
+                "claimed_exit_code": claimed,
+                "test_command": test_command,
+                "actual_exit_code": None,
+                "status": "error",
+                "detail": f"test_command timed out after {timeout_s}s",
+            })
+            continue
+        except OSError as e:
+            records.append({
+                "subtask_id": spec.id,
+                "role": "implementer",
+                "claimed_exit_code": claimed,
+                "test_command": test_command,
+                "actual_exit_code": None,
+                "status": "error",
+                "detail": f"failed to invoke test_command: {e}",
+            })
+            continue
+
+        actual = proc.returncode
+        if actual == claimed:
+            detail = "exit codes match"
+            status = "match"
+        else:
+            status = "mismatch"
+            tail_lines = ((proc.stdout or "") + (proc.stderr or "")).splitlines()[-10:]
+            tail = "\n".join(tail_lines)
+            detail = f"claimed {claimed}, got {actual}"
+            if tail:
+                detail += f"\n--- output tail ---\n{tail}"
+        records.append({
+            "subtask_id": spec.id,
+            "role": "implementer",
+            "claimed_exit_code": claimed,
+            "test_command": test_command,
+            "actual_exit_code": actual,
+            "status": status,
+            "detail": detail,
+        })
+
+    return records
+
+
+def _resolve_test_command_from_dir(plan, current_id: str, subtasks_root: Path, result: Result) -> str | None:
+    """Mirror of tick._resolve_test_command without importing tick (which would
+    pull in dispatch machinery). Prefer the implementer's own handoff, then
+    walk back to the most recent tester's declared test_command."""
+    from . import board as _board
+
+    h = result.handoff or {}
+    if isinstance(h.get("test_command"), str) and h["test_command"]:
+        return h["test_command"]
+    priors = []
+    for spec in plan.subtasks:
+        if spec.id == current_id:
+            break
+        priors.append(spec)
+    for spec in reversed(priors):
+        if spec.role != "tester":
+            continue
+        r = _board.read_result(subtasks_root / spec.id)
+        if r is None or r.handoff is None:
+            continue
+        cmd = r.handoff.get("test_command")
+        if isinstance(cmd, str) and cmd:
+            return cmd
+    return None
+
+
 def verify_implementer_test_rerun(
     spec: SubtaskSpec,
     result: Result,

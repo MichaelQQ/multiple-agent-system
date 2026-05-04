@@ -696,6 +696,58 @@ def cost(task_id: str) -> None:
 
 
 @app.command()
+def verify(
+    task_id: str = typer.Argument(..., help="Task ID to audit"),
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON instead of Rich table"),
+    timeout: int = typer.Option(300, "--timeout", help="Per-subtask test_command timeout (seconds)"),
+) -> None:
+    """Re-run a task's recorded test_command and audit handoff.final_exit_code.
+
+    Cheap, off-critical-path auditor. For each implementer subtask under the
+    parent, re-runs the declared `test_command` in the parent's worktree and
+    compares the actual exit code against the implementer's claimed
+    `handoff.final_exit_code`. Exits non-zero on any mismatch or error.
+    """
+    import json as _json
+
+    from . import verify as _verify
+
+    mas = project_dir()
+    located = board.find_task(mas, task_id)
+    if located is None:
+        typer.echo(f"task not found: {task_id}")
+        raise typer.Exit(1)
+
+    _, tdir = located
+    records = _verify.audit_task_test_command(tdir, timeout_s=timeout)
+
+    if json_output:
+        typer.echo(_json.dumps({"task_id": task_id, "records": records}, indent=2))
+    else:
+        if not records:
+            typer.echo("no implementer subtasks with recorded handoff to audit")
+        else:
+            table = Table("subtask", "claimed", "actual", "status", "detail")
+            colors = {"match": "green", "mismatch": "red", "skipped": "yellow", "error": "red"}
+            for r in records:
+                color = colors.get(r["status"], "white")
+                claimed = "-" if r["claimed_exit_code"] is None else str(r["claimed_exit_code"])
+                actual = "-" if r["actual_exit_code"] is None else str(r["actual_exit_code"])
+                table.add_row(
+                    r["subtask_id"],
+                    claimed,
+                    actual,
+                    f"[{color}]{r['status']}[/{color}]",
+                    r["detail"],
+                )
+            console.print(table)
+
+    bad = [r for r in records if r["status"] in ("mismatch", "error")]
+    if bad:
+        raise typer.Exit(1)
+
+
+@app.command()
 def events(
     task: str | None = typer.Option(None, "--task", help="Filter by task id"),
     role: str | None = typer.Option(None, "--role", help="Filter by role"),
