@@ -283,6 +283,7 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
         current_subtask._delete_current_subtask_marker(parent_dir)
         from . import verify as _verify
         result = _verify.verify_child_result(next_child, result, child_dir, child_attempt)
+        result = _verify.verify_allowed_paths(next_child, result, wt, child_dir)
         if next_child.role == "evaluator":
             result = _verify.verify_evaluator_result(next_child, result, wt)
         if next_child.role == "implementer":
@@ -314,6 +315,9 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
         cycle=parent_task.cycle,
         attempt=child_attempt,
     )
+    if next_child.constraints.get("allowed_paths"):
+        from . import verify as _verify
+        _verify.capture_worktree_baseline(wt, child_dir)
     pid = _dispatch_role(env, child_task, child_dir, wt, role=next_child.role)
     current_subtask._write_current_subtask_marker(
         parent_dir,

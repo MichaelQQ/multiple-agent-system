@@ -92,7 +92,7 @@ Effort: S (trace) + M (patterns).
 - [x] **7.** Git tag snapshots `mas/{task_id}/green-{cycle}` on green (gap 2)
 - [x] **8.** Replan trigger: orchestrator re-dispatch with `replan_reason` after near-exhaustion (gap 4)
 - [x] **9.** Convergence detector: Jaccard similarity on cycle-N vs cycle-(N-1) feedback (gap 4)
-- [ ] **10.** `subtask.constraints.allowed_paths` post-hoc enforcement via `git diff --name-only` (gap 5)
+- [x] **10.** `subtask.constraints.allowed_paths` post-hoc enforcement via `git diff --name-only` (gap 5)
 - [ ] **11.** `mas verify <task_id>` CLI: re-run recorded `test_command` and audit (gap 5)
 - [ ] **12.** Provider diversity rule: validate `evaluator.provider != implementer.provider` (gap 3)
 - [ ] **13.** Optional `arbiter` role for structured disagreement resolution (gap 3)

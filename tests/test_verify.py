@@ -336,3 +336,189 @@ def test_verify_evaluator_nonpass_verdict_passthrough(tmp_path: Path):
     r = Result(task_id="x", status="needs_revision", summary="r", verdict="needs_revision")
     out = verify_evaluator_result(spec, r, tmp_path)
     assert out is r
+
+
+# --- allowed_paths post-hoc enforcement -------------------------------------
+
+import subprocess as _sp
+
+from mas.verify import (
+    _path_allowed,
+    capture_worktree_baseline,
+    verify_allowed_paths,
+)
+
+
+def _init_worktree(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    _sp.run(["git", "init", "-q", "-b", "main", str(path)], check=True)
+    _sp.run(["git", "-C", str(path), "config", "user.email", "t@t"], check=True)
+    _sp.run(["git", "-C", str(path), "config", "user.name", "t"], check=True)
+    _sp.run(["git", "-C", str(path), "config", "commit.gpgsign", "false"], check=True)
+    (path / ".gitkeep").write_text("")
+    _sp.run(["git", "-C", str(path), "add", "-A"], check=True)
+    _sp.run(["git", "-C", str(path), "commit", "-q", "-m", "init"], check=True)
+
+
+def test_path_allowed_exact():
+    assert _path_allowed("src/mas/tick.py", ["src/mas/tick.py"])
+    assert not _path_allowed("src/mas/board.py", ["src/mas/tick.py"])
+
+
+def test_path_allowed_glob():
+    assert _path_allowed("src/mas/tick.py", ["src/mas/*.py"])
+    assert _path_allowed("README.md", ["*.md"])
+    assert not _path_allowed("src/mas/sub/x.py", ["src/mas/*.py"])
+
+
+def test_path_allowed_directory_prefix():
+    assert _path_allowed("src/mas/sub/x.py", ["src/mas/"])
+    assert _path_allowed("src/mas/sub/x.py", ["src/mas"])
+    assert not _path_allowed("docs/x.md", ["src/mas/"])
+
+
+def test_verify_allowed_paths_passthrough_no_constraint(tmp_path: Path):
+    spec = SubtaskSpec(id="i-1", role="implementer", goal="i")
+    r = Result(task_id="x", status="success", summary="ok",
+               handoff={"final_exit_code": 0})
+    out = verify_allowed_paths(spec, r, tmp_path, tmp_path)
+    assert out is r
+
+
+def test_verify_allowed_paths_passthrough_failure(tmp_path: Path):
+    spec = SubtaskSpec(id="i-1", role="implementer", goal="i",
+                       constraints={"allowed_paths": ["src/x.py"]})
+    r = Result(task_id="x", status="failure", summary="nope")
+    out = verify_allowed_paths(spec, r, tmp_path, tmp_path)
+    assert out is r
+
+
+def test_verify_allowed_paths_passthrough_docs_only(tmp_path: Path):
+    spec = SubtaskSpec(id="i-1", role="implementer", goal="docs",
+                       constraints={"docs_only": True, "allowed_paths": ["src/x.py"]})
+    r = Result(task_id="x", status="success", summary="ok")
+    out = verify_allowed_paths(spec, r, tmp_path, tmp_path)
+    assert out is r
+
+
+def test_verify_allowed_paths_within_allowlist_passes(tmp_path: Path):
+    wt = tmp_path / "wt"
+    _init_worktree(wt)
+    child_dir = tmp_path / "child"
+    child_dir.mkdir()
+    capture_worktree_baseline(wt, child_dir)
+
+    (wt / "src").mkdir()
+    (wt / "src" / "tick.py").write_text("print('x')\n")
+
+    spec = SubtaskSpec(id="i-1", role="implementer", goal="i",
+                       constraints={"allowed_paths": ["src/tick.py"]})
+    r = Result(task_id="x", status="success", summary="ok",
+               handoff={"final_exit_code": 0})
+    out = verify_allowed_paths(spec, r, wt, child_dir)
+    assert out.status == "success"
+    assert out is r
+
+
+def test_verify_allowed_paths_outside_allowlist_coerces(tmp_path: Path):
+    wt = tmp_path / "wt"
+    _init_worktree(wt)
+    child_dir = tmp_path / "child"
+    child_dir.mkdir()
+    capture_worktree_baseline(wt, child_dir)
+
+    (wt / "docs").mkdir()
+    (wt / "docs" / "extra.md").write_text("oops\n")
+
+    spec = SubtaskSpec(id="i-1", role="implementer", goal="i",
+                       constraints={"allowed_paths": ["src/tick.py"]})
+    r = Result(task_id="x", status="success", summary="ok",
+               handoff={"final_exit_code": 0})
+    out = verify_allowed_paths(spec, r, wt, child_dir)
+    assert out.status == "failure"
+    assert "outside allowed_paths" in out.summary
+    assert "docs/extra.md" in out.summary
+
+
+def test_verify_allowed_paths_ignores_pre_existing_dirty(tmp_path: Path):
+    """Files already dirty at dispatch don't count as this subtask's changes."""
+    wt = tmp_path / "wt"
+    _init_worktree(wt)
+    (wt / "old_dirty.txt").write_text("from a previous subtask\n")
+
+    child_dir = tmp_path / "child"
+    child_dir.mkdir()
+    capture_worktree_baseline(wt, child_dir)
+
+    (wt / "src").mkdir()
+    (wt / "src" / "tick.py").write_text("ok\n")
+
+    spec = SubtaskSpec(id="i-1", role="implementer", goal="i",
+                       constraints={"allowed_paths": ["src/tick.py"]})
+    r = Result(task_id="x", status="success", summary="ok",
+               handoff={"final_exit_code": 0})
+    out = verify_allowed_paths(spec, r, wt, child_dir)
+    assert out.status == "success"
+
+
+def test_verify_allowed_paths_missing_worktree(tmp_path: Path):
+    spec = SubtaskSpec(id="i-1", role="implementer", goal="i",
+                       constraints={"allowed_paths": ["src/x.py"]})
+    r = Result(task_id="x", status="success", summary="ok")
+    out = verify_allowed_paths(spec, r, tmp_path / "nope", tmp_path)
+    assert out is r
+
+
+def test_verify_allowed_paths_no_baseline_uses_full_dirty(tmp_path: Path):
+    """Without a baseline file, every dirty file is attributed to the subtask."""
+    wt = tmp_path / "wt"
+    _init_worktree(wt)
+    (wt / "outside.txt").write_text("nope\n")
+
+    child_dir = tmp_path / "child"
+    child_dir.mkdir()
+
+    spec = SubtaskSpec(id="i-1", role="implementer", goal="i",
+                       constraints={"allowed_paths": ["src/tick.py"]})
+    r = Result(task_id="x", status="success", summary="ok")
+    out = verify_allowed_paths(spec, r, wt, child_dir)
+    assert out.status == "failure"
+    assert "outside.txt" in out.summary
+
+
+def test_verify_allowed_paths_detects_committed_changes(tmp_path: Path):
+    """Files committed between dispatch and result-collection still count."""
+    wt = tmp_path / "wt"
+    _init_worktree(wt)
+    child_dir = tmp_path / "child"
+    child_dir.mkdir()
+    capture_worktree_baseline(wt, child_dir)
+
+    (wt / "rogue.bin").write_text("data\n")
+    _sp.run(["git", "-C", str(wt), "add", "-A"], check=True)
+    _sp.run(["git", "-C", str(wt), "commit", "-q", "-m", "intermediate"], check=True)
+
+    spec = SubtaskSpec(id="i-1", role="implementer", goal="i",
+                       constraints={"allowed_paths": ["src/x.py"]})
+    r = Result(task_id="x", status="success", summary="ok")
+    out = verify_allowed_paths(spec, r, wt, child_dir)
+    assert out.status == "failure"
+    assert "rogue.bin" in out.summary
+
+
+def test_verify_allowed_paths_directory_prefix_pattern(tmp_path: Path):
+    wt = tmp_path / "wt"
+    _init_worktree(wt)
+    child_dir = tmp_path / "child"
+    child_dir.mkdir()
+    capture_worktree_baseline(wt, child_dir)
+
+    (wt / "src" / "deep").mkdir(parents=True)
+    (wt / "src" / "deep" / "x.py").write_text("ok\n")
+
+    spec = SubtaskSpec(id="i-1", role="implementer", goal="i",
+                       constraints={"allowed_paths": ["src/"]})
+    r = Result(task_id="x", status="success", summary="ok",
+               handoff={"final_exit_code": 0})
+    out = verify_allowed_paths(spec, r, wt, child_dir)
+    assert out.status == "success"

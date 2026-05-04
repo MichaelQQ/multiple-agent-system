@@ -26,10 +26,12 @@ mark work complete that does not satisfy its own acceptance criteria.
 """
 from __future__ import annotations
 
+import fnmatch
+import json
 import re
 import shlex
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from pydantic import ValidationError
 
@@ -303,6 +305,173 @@ def verify_evaluator_result(
         "summary": f"[verify:needs_revision] {reason}. original: {result.summary}",
         "feedback": (result.feedback or "") + f"\n[verify:needs_revision] {reason}",
     })
+
+
+_BASELINE_FILE = ".baseline.json"
+
+
+def _git_head_sha(worktree: Path) -> str | None:
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(worktree), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    sha = r.stdout.strip()
+    return sha or None
+
+
+def _dirty_files(worktree: Path) -> set[str]:
+    """Return the set of paths reported by `git status --porcelain -uall` —
+    modified, added, deleted, renamed, or untracked (excluding gitignored).
+    `-uall` expands untracked directories so we get individual file paths
+    rather than a collapsed `dir/` entry."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(worktree), "status", "--porcelain", "-uall"],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return set()
+    if r.returncode != 0:
+        return set()
+    files: set[str] = set()
+    for line in r.stdout.splitlines():
+        if len(line) < 4:
+            continue
+        path = line[3:]
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        files.add(path.strip().strip('"'))
+    return {f for f in files if f}
+
+
+def _committed_changes_since(worktree: Path, baseline_sha: str) -> set[str]:
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(worktree), "diff", "--name-only", baseline_sha, "HEAD"],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return set()
+    if r.returncode != 0:
+        return set()
+    return {ln.strip() for ln in r.stdout.splitlines() if ln.strip()}
+
+
+def capture_worktree_baseline(worktree: Path, child_dir: Path) -> None:
+    """Snapshot `HEAD` SHA + dirty files into `child_dir/.baseline.json` so a
+    later `verify_allowed_paths` call can compute the delta this subtask
+    actually introduced. Idempotent — overwrites on each dispatch (intended
+    behavior on retry: measure against the new starting point)."""
+    if not worktree.is_dir():
+        return
+    payload = {
+        "head_sha": _git_head_sha(worktree),
+        "dirty": sorted(_dirty_files(worktree)),
+    }
+    try:
+        (child_dir / _BASELINE_FILE).write_text(json.dumps(payload))
+    except OSError:
+        pass
+
+
+def _read_baseline(child_dir: Path) -> dict | None:
+    p = child_dir / _BASELINE_FILE
+    if not p.exists():
+        return None
+    try:
+        data = json.loads(p.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
+def _changed_files_since(worktree: Path, baseline: dict | None) -> set[str]:
+    current_dirty = _dirty_files(worktree)
+    if baseline is None:
+        return current_dirty
+    baseline_dirty = set(baseline.get("dirty") or [])
+    new_dirty = current_dirty - baseline_dirty
+    baseline_sha = baseline.get("head_sha")
+    committed: set[str] = set()
+    if isinstance(baseline_sha, str) and baseline_sha:
+        committed = _committed_changes_since(worktree, baseline_sha)
+    return new_dirty | committed
+
+
+def _path_allowed(path: str, patterns: list) -> bool:
+    """Match a path against an allowlist. Supported pattern forms:
+      - exact: `src/mas/tick.py`
+      - shell glob (path-aware via `PurePosixPath.match`, where `*` does
+        not cross `/`): `src/mas/*.py`, `*.md`
+      - directory prefix (with or without trailing slash): `src/mas/` or
+        `src/mas` allows any descendant `src/mas/foo/bar.py`.
+    Falls back to `fnmatch` when `PurePosixPath.match` rejects the pattern."""
+    p = PurePosixPath(path)
+    for pat in patterns:
+        if not isinstance(pat, str) or not pat:
+            continue
+        if path == pat:
+            return True
+        prefix = pat.rstrip("/")
+        if prefix and path.startswith(prefix + "/"):
+            return True
+        if any(ch in pat for ch in "*?["):
+            try:
+                if p.match(pat):
+                    return True
+            except (ValueError, NotImplementedError):
+                if fnmatch.fnmatch(path, pat):
+                    return True
+    return False
+
+
+def verify_allowed_paths(
+    spec: SubtaskSpec,
+    result: Result,
+    worktree: Path,
+    child_dir: Path,
+) -> Result:
+    """If `spec.constraints.allowed_paths` is declared, compute the worktree
+    files this subtask changed (relative to the dispatch-time baseline) and
+    coerce to failure if any change falls outside the allowlist.
+
+    Skipped on non-success results, docs_only specs, missing worktree, or when
+    no allowed_paths constraint is set. Without a baseline file, falls back to
+    the worktree's full dirty set — strict but conservative."""
+    if result.status != "success":
+        return result
+    if _is_docs_only(spec):
+        return result
+    constraints = spec.constraints or {}
+    allowed = constraints.get("allowed_paths")
+    if not allowed or not isinstance(allowed, list):
+        return result
+    if not worktree.is_dir():
+        return result
+
+    baseline = _read_baseline(child_dir)
+    changed = _changed_files_since(worktree, baseline)
+    if not changed:
+        return result
+
+    violations = sorted(f for f in changed if not _path_allowed(f, allowed))
+    if not violations:
+        return result
+
+    shown = violations[:10]
+    suffix = f" (+{len(violations) - 10} more)" if len(violations) > 10 else ""
+    return _coerce(
+        result,
+        f"{spec.role} touched files outside allowed_paths={list(allowed)}: "
+        f"{shown}{suffix}",
+    )
 
 
 def _grep_count(worktree: Path, pattern: str, glob: str) -> int:

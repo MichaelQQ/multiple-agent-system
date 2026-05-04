@@ -17,6 +17,14 @@ plan failed to converge. Read the reason carefully and emit a *different*
 plan — change the test approach, decomposition, or implementation strategy.
 Do not repeat the previous plan verbatim.
 
+You may scope each subtask to a path allowlist by setting
+`constraints.allowed_paths: [<glob or path>, ...]`. After the subtask
+finishes, the tick re-runs `git diff` against the dispatch-time worktree
+and rejects (status=failure) if any changed file is outside the allowlist.
+Patterns support exact paths (`src/mas/tick.py`), shell globs where `*`
+does not cross `/` (`src/mas/*.py`, `*.md`), and directory prefixes
+(`src/mas/`). Use sparingly — only when scope creep is a real risk.
+
 Task id: $task_id
 Goal: $goal
 Inputs:
