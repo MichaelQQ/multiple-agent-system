@@ -8,7 +8,7 @@ import re
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-Role = Literal["proposer", "orchestrator", "implementer", "tester", "evaluator"]
+Role = Literal["proposer", "orchestrator", "implementer", "tester", "evaluator", "arbiter"]
 Status = Literal["success", "failure", "needs_revision", "environment_error"]
 Verdict = Literal["pass", "fail", "needs_revision"]
 
@@ -93,6 +93,18 @@ class TesterHandoff(BaseModel):
     notes: str | None = None
 
 
+class ClaimDispute(BaseModel):
+    """A single evaluator-claim/implementer-response pair the implementer
+    flagged as contested. When the implementer's handoff carries one or more
+    of these on a revision cycle, an `arbiter` (if configured) is dispatched
+    to issue a binding verdict instead of looping the cycle again."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    evaluator_claim: str
+    implementer_response: str
+
+
 class ImplementerHandoff(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -100,11 +112,24 @@ class ImplementerHandoff(BaseModel):
     final_exit_code: int
     test_command: str | None = None
     notes: str | None = None
+    disputes: list[ClaimDispute] = Field(default_factory=list)
 
 
 class EvaluatorHandoff(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    notes: str | None = None
+
+
+class ArbiterHandoff(BaseModel):
+    """Binding verdict from an arbiter dispatched to resolve evaluator vs
+    implementer disagreement. `verdict` mirrors evaluator semantics."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rationale: str
+    upheld_claims: list[str] = Field(default_factory=list)
+    rejected_claims: list[str] = Field(default_factory=list)
     notes: str | None = None
 
 

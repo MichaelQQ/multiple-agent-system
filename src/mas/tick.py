@@ -493,11 +493,13 @@ def _next_ready_child(plan: Plan, subtasks_root: Path):
         result = board.read_result(child_dir) if child_dir.exists() else None
         if result is None:
             return spec
-        if result.status == "success" and (spec.role != "evaluator" or result.verdict == "pass"):
+        if result.status == "success" and (
+            spec.role not in ("evaluator", "arbiter") or result.verdict == "pass"
+        ):
             continue
         # Evaluator that returned needs_revision is "handled" once a later
-        # revision cycle has been appended; otherwise tick loops on the same
-        # evaluator forever.
+        # revision cycle (or arbiter) has been appended; otherwise tick loops
+        # on the same evaluator forever.
         if (spec.role == "evaluator"
                 and (result.verdict == "needs_revision" or result.status == "needs_revision")
                 and i + 1 < len(plan.subtasks)):
@@ -527,6 +529,8 @@ def _all_children_passed(plan: Plan, subtasks_root: Path) -> bool:
             return False
         if spec.role == "evaluator" and result.verdict != "pass":
             return False
+        if spec.role == "arbiter" and result.verdict != "pass":
+            return False
     return True
 
 
@@ -548,13 +552,20 @@ def _handle_child_result(env, parent_dir, parent_task, plan, spec, result):
         txn_str = " | ".join(f"{txn.from_state}→{txn.to_state}({txn.reason})" for txn in txns)
         result.feedback = (result.feedback or "") + (f"\n[transition history: {txn_str}]" if result.feedback else f"[transition history: {txn_str}]")
 
-    # Success path: mark and move on (by next tick).
-    if result.status == "success" and (spec.role != "evaluator" or result.verdict == "pass"):
+    # Success path: mark and move on (by next tick). Evaluator/arbiter must
+    # also return verdict=pass — verdict=fail/needs_revision routes below.
+    if result.status == "success" and (
+        spec.role not in ("evaluator", "arbiter") or result.verdict == "pass"
+    ):
         return
 
     # Evaluator verdict handling
     if spec.role == "evaluator" and result.verdict == "needs_revision":
         feedback = result.feedback or ""
+        if _should_dispatch_arbiter(env, plan, parent_dir):
+            disputes = _latest_implementer_disputes(plan, parent_dir)
+            _append_arbiter_subtask(parent_dir, plan, parent_task, feedback=feedback, disputes=disputes)
+            return
         converged, sim = _detect_convergence(plan, feedback)
         if converged:
             reason = f"convergence_detected jaccard={sim:.2f}"
@@ -571,6 +582,21 @@ def _handle_child_result(env, parent_dir, parent_task, plan, spec, result):
         if not appended:
             failed_dir = env.mas / "tasks" / "failed" / parent_task.id
             board.move(parent_dir, failed_dir, reason="revision_cycles_exhausted")
+        return
+
+    # Arbiter verdict handling: binding pass/fail. Pass treated as parent
+    # acceptance — falls through so _all_children_passed will finalize.
+    # Fail moves parent straight to failed/ regardless of remaining cycles.
+    if spec.role == "arbiter" and result.status == "success":
+        if result.verdict == "pass":
+            return
+        if result.verdict == "fail":
+            failed_dir = env.mas / "tasks" / "failed" / parent_task.id
+            board.move(parent_dir, failed_dir, reason="arbiter_verdict_fail")
+            return
+        # verdict == needs_revision (or missing) → treat as inconclusive failure
+        failed_dir = env.mas / "tasks" / "failed" / parent_task.id
+        board.move(parent_dir, failed_dir, reason="arbiter_verdict_inconclusive")
         return
 
     child_dir = parent_dir / "subtasks" / spec.id
@@ -711,6 +737,74 @@ def _trigger_replan(env: TickEnv, parent_dir: Path, parent_task: Task, reason: s
         provider=env.cfg.roles["orchestrator"].provider,
         summary=f"replan {n}: re-dispatching orchestrator",
     )
+
+
+def _latest_implementer_disputes(plan: Plan, parent_dir: Path) -> list[dict]:
+    """Read the most-recent implementer subtask's handoff and return its
+    `disputes` list (each entry a `{evaluator_claim, implementer_response}`
+    dict). Returns [] when no implementer has run yet, the handoff is
+    malformed, or no disputes were recorded."""
+    subtasks_root = parent_dir / "subtasks"
+    for spec in reversed(plan.subtasks):
+        if spec.role != "implementer":
+            continue
+        r = board.read_result(subtasks_root / spec.id)
+        if r is None or r.handoff is None:
+            return []
+        raw = r.handoff.get("disputes")
+        if not isinstance(raw, list):
+            return []
+        out: list[dict] = []
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            claim = entry.get("evaluator_claim")
+            response = entry.get("implementer_response")
+            if isinstance(claim, str) and isinstance(response, str) and claim and response:
+                out.append({"evaluator_claim": claim, "implementer_response": response})
+        return out
+    return []
+
+
+def _should_dispatch_arbiter(env: TickEnv, plan: Plan, parent_dir: Path) -> bool:
+    """True when (1) `arbiter` is configured as a role, (2) at least one
+    revision cycle already ran, (3) no arbiter has been dispatched yet for
+    this plan, and (4) the latest implementer raised non-empty disputes."""
+    if "arbiter" not in env.cfg.roles:
+        return False
+    existing_cycles = len({s.id.split("-", 2)[1] for s in plan.subtasks if s.id.startswith("rev-")})
+    if existing_cycles < 1:
+        return False
+    if any(s.role == "arbiter" for s in plan.subtasks):
+        return False
+    return bool(_latest_implementer_disputes(plan, parent_dir))
+
+
+def _append_arbiter_subtask(
+    parent_dir: Path,
+    plan: Plan,
+    parent_task,
+    *,
+    feedback: str,
+    disputes: list[dict],
+) -> None:
+    """Append a single arbiter subtask to the plan. The arbiter receives the
+    last evaluator's feedback and the implementer's disputes; its verdict is
+    binding (pass → parent finalizes; fail → parent moves to failed/)."""
+    from .schemas import SubtaskSpec
+
+    spec = SubtaskSpec(
+        id="arbiter-1",
+        role="arbiter",
+        goal="Resolve evaluator/implementer disagreement and emit binding verdict",
+        inputs={
+            "evaluator_feedback": feedback,
+            "disputes": disputes,
+            "parent_goal": parent_task.goal,
+        },
+    )
+    plan.subtasks.append(spec)
+    (parent_dir / "plan.json").write_text(plan.model_dump_json(indent=2))
 
 
 def _append_revision_cycle(parent_dir: Path, plan: Plan, parent_task, feedback: str) -> bool:

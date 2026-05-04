@@ -120,3 +120,16 @@ roles:
     max_retries: 1
     allowed_tools: [Read, Grep, Glob]
     permission_mode: bypassPermissions
+
+  # arbiter:
+  #   # Optional. When configured, dispatched after at least one revision cycle
+  #   # if the implementer's handoff carried `disputes` against the evaluator's
+  #   # feedback. The arbiter's verdict is binding (pass → accept the work,
+  #   # fail → parent moves to failed/). Pick a strong reasoning model with
+  #   # provider distinct from both implementer and evaluator.
+  #   provider: claude-code
+  #   model: claude-opus-4-7
+  #   timeout_s: 900
+  #   max_retries: 1
+  #   allowed_tools: [Read, Grep, Glob]
+  #   permission_mode: default

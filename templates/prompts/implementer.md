@@ -48,6 +48,17 @@ If `constraints.docs_only` is true, this is a documentation subtask:
 - `status: "success"` if docs are updated and consistent with the change; set
   `artifacts` to the list of doc files you edited.
 
+### Disputing evaluator claims (revision cycles)
+
+When this is a revision cycle (`inputs.feedback` carries the evaluator's
+prior feedback), you may flag any specific claim you disagree with after
+attempting the fix. Populate `handoff.disputes` with one entry per contested
+claim: `{"evaluator_claim": "<verbatim>", "implementer_response": "<why>"}`.
+Only dispute claims you can defend with concrete evidence in the worktree —
+unfounded disputes will be rejected by the arbiter (if configured) and may
+fail the parent task. Leave `disputes` empty (or omit it) when you fully
+agree with the feedback.
+
 ## Output
 
 When done, write `$task_dir/result.json` (do **not** write it inside the worktree):
@@ -55,6 +66,6 @@ When done, write `$task_dir/result.json` (do **not** write it inside the worktre
 - `status`: "success" if `test_command` exits 0; "failure" otherwise
 - `summary`: what you changed and the final test run outcome
 - `artifacts`: list of implementation files changed (paths relative to worktree; must NOT include any `test_files`)
-- `handoff`: { "changed_files": [...], "final_exit_code": <int>, "notes": "..." }
+- `handoff`: { "changed_files": [...], "final_exit_code": <int>, "notes": "...", "disputes": [{"evaluator_claim": "...", "implementer_response": "..."}] }
 
 $result_schema

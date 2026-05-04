@@ -2270,3 +2270,300 @@ def test_cost_budget_task_override_beats_config_default(tmp_path: Path):
     mock_dispatch.assert_not_called()
     failed_dir = mas / "tasks" / "failed" / "20260424-override-aaaa"
     assert failed_dir.exists(), "task-level cost_budget_usd must override config default"
+
+
+# ---------------------------------------------------------------------------
+# Arbiter dispatch (gap 3 / TODO #13)
+# ---------------------------------------------------------------------------
+
+def _cfg_with_arbiter() -> MasConfig:
+    """Cfg matching `_cfg()` plus an arbiter role on the same provider."""
+    return MasConfig(
+        providers={"mock": ProviderConfig(cli="sh", max_concurrent=2, extra_args=[])},
+        roles={
+            "proposer": RoleConfig(provider="mock"),
+            "orchestrator": RoleConfig(provider="mock"),
+            "implementer": RoleConfig(provider="mock"),
+            "tester": RoleConfig(provider="mock"),
+            "evaluator": RoleConfig(provider="mock"),
+            "arbiter": RoleConfig(provider="mock"),
+        },
+        max_proposed=10,
+        proposal_similarity_threshold=0.7,
+    )
+
+
+def _seed_revision_cycle_with_disputes(
+    tmp_path: Path, parent_id: str, *, disputes: list[dict]
+) -> tuple[Path, Plan, Path]:
+    """Set up a parent that has run cycle 1 (impl raised disputes) and is now
+    handling a needs_revision evaluator from cycle 1. Returns (parent_dir,
+    plan, mas_dir)."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent = board.task_dir(mas, "doing", parent_id)
+    parent.mkdir(parents=True)
+    board.write_task(parent, Task(id=parent_id, role="orchestrator", goal="g"))
+    subtasks = parent / "subtasks"
+    subtasks.mkdir()
+
+    plan = Plan(
+        parent_id=parent_id, summary="s",
+        subtasks=[
+            SubtaskSpec(id="test-1", role="tester", goal="t"),
+            SubtaskSpec(id="impl-1", role="implementer", goal="i"),
+            SubtaskSpec(id="eval-1", role="evaluator", goal="e"),
+            SubtaskSpec(id="rev-1-tester", role="tester", goal="r1t"),
+            SubtaskSpec(id="rev-1-implementer", role="implementer", goal="r1i"),
+            SubtaskSpec(id="rev-1-evaluator", role="evaluator", goal="r1e"),
+        ],
+        max_revision_cycles=2,
+    )
+    (parent / "plan.json").write_text(plan.model_dump_json())
+
+    impl_dir = subtasks / "rev-1-implementer"
+    impl_dir.mkdir()
+    (impl_dir / "result.json").write_text(
+        Result(
+            task_id="rev-1-implementer",
+            status="success",
+            summary="addressed feedback",
+            handoff={
+                "changed_files": ["x.py"],
+                "final_exit_code": 0,
+                "disputes": disputes,
+            },
+        ).model_dump_json()
+    )
+    return parent, plan, mas
+
+
+def test_arbiter_dispatched_when_implementer_disputes_evaluator(tmp_path: Path):
+    """Cycle-1 evaluator says needs_revision but implementer raised disputes:
+    arbiter subtask is appended instead of a new revision cycle."""
+    parent, plan, mas = _seed_revision_cycle_with_disputes(
+        tmp_path, "20260504-p-arb1-aaaa",
+        disputes=[{"evaluator_claim": "missing X", "implementer_response": "X is at line 12"}],
+    )
+
+    spec = next(s for s in plan.subtasks if s.id == "rev-1-evaluator")
+    result = Result(
+        task_id="rev-1-evaluator", status="needs_revision",
+        summary="still off", verdict="needs_revision", feedback="missing X",
+    )
+
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg_with_arbiter())
+    _handle_child_result(env, parent, board.read_task(parent), plan, spec, result)
+
+    refreshed = parse_plan(parent / "plan.json", "20260504-p-arb1-aaaa")
+    arbiters = [s for s in refreshed.subtasks if s.role == "arbiter"]
+    assert len(arbiters) == 1
+    assert arbiters[0].id == "arbiter-1"
+    assert arbiters[0].inputs["evaluator_feedback"] == "missing X"
+    assert arbiters[0].inputs["disputes"] == [
+        {"evaluator_claim": "missing X", "implementer_response": "X is at line 12"}
+    ]
+    # No new rev-2-* cycle was appended.
+    assert not any(s.id.startswith("rev-2-") for s in refreshed.subtasks)
+
+
+def test_arbiter_skipped_when_role_not_configured(tmp_path: Path):
+    """Without an arbiter role configured, the normal revision cycle is appended
+    even when implementer raised disputes."""
+    parent, plan, mas = _seed_revision_cycle_with_disputes(
+        tmp_path, "20260504-p-arb2-aaaa",
+        disputes=[{"evaluator_claim": "c", "implementer_response": "r"}],
+    )
+
+    spec = next(s for s in plan.subtasks if s.id == "rev-1-evaluator")
+    result = Result(
+        task_id="rev-1-evaluator", status="needs_revision",
+        summary="x", verdict="needs_revision", feedback="fb",
+    )
+
+    cfg = _cfg()  # no arbiter role
+    cfg.max_replans = 0  # disable replan path so we deterministically hit append
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=cfg)
+    _handle_child_result(env, parent, board.read_task(parent), plan, spec, result)
+
+    refreshed = parse_plan(parent / "plan.json", "20260504-p-arb2-aaaa")
+    assert not any(s.role == "arbiter" for s in refreshed.subtasks)
+    assert any(s.id.startswith("rev-2-") for s in refreshed.subtasks)
+
+
+def test_arbiter_skipped_on_first_cycle_eval(tmp_path: Path):
+    """No revision cycle has run yet (cycle-0 evaluator) → arbiter must not be
+    dispatched even if implementer's handoff carried disputes."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent_id = "20260504-p-arb3-aaaa"
+    parent = board.task_dir(mas, "doing", parent_id)
+    parent.mkdir(parents=True)
+    board.write_task(parent, Task(id=parent_id, role="orchestrator", goal="g"))
+    subtasks = parent / "subtasks"
+    subtasks.mkdir()
+
+    plan = Plan(
+        parent_id=parent_id, summary="s",
+        subtasks=[
+            SubtaskSpec(id="test-1", role="tester", goal="t"),
+            SubtaskSpec(id="impl-1", role="implementer", goal="i"),
+            SubtaskSpec(id="eval-1", role="evaluator", goal="e"),
+        ],
+        max_revision_cycles=2,
+    )
+    (parent / "plan.json").write_text(plan.model_dump_json())
+
+    impl_dir = subtasks / "impl-1"
+    impl_dir.mkdir()
+    (impl_dir / "result.json").write_text(
+        Result(
+            task_id="impl-1", status="success", summary="ok",
+            handoff={
+                "changed_files": [], "final_exit_code": 0,
+                "disputes": [{"evaluator_claim": "c", "implementer_response": "r"}],
+            },
+        ).model_dump_json()
+    )
+
+    spec = next(s for s in plan.subtasks if s.id == "eval-1")
+    result = Result(
+        task_id="eval-1", status="needs_revision",
+        summary="x", verdict="needs_revision", feedback="fb",
+    )
+
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg_with_arbiter())
+    _handle_child_result(env, parent, board.read_task(parent), plan, spec, result)
+
+    refreshed = parse_plan(parent / "plan.json", parent_id)
+    assert not any(s.role == "arbiter" for s in refreshed.subtasks)
+    assert any(s.id.startswith("rev-1-") for s in refreshed.subtasks)
+
+
+def test_arbiter_skipped_when_no_disputes(tmp_path: Path):
+    """Implementer didn't raise disputes → fall through to normal revision flow.
+    Uses max_replans=0 to keep this test scoped to append-cycle path; replan
+    behavior is exercised separately."""
+    parent, plan, mas = _seed_revision_cycle_with_disputes(
+        tmp_path, "20260504-p-arb4-aaaa", disputes=[]
+    )
+    spec = next(s for s in plan.subtasks if s.id == "rev-1-evaluator")
+    result = Result(
+        task_id="rev-1-evaluator", status="needs_revision",
+        summary="x", verdict="needs_revision", feedback="fb",
+    )
+
+    cfg = _cfg_with_arbiter()
+    cfg.max_replans = 0
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=cfg)
+    _handle_child_result(env, parent, board.read_task(parent), plan, spec, result)
+
+    refreshed = parse_plan(parent / "plan.json", "20260504-p-arb4-aaaa")
+    assert not any(s.role == "arbiter" for s in refreshed.subtasks)
+
+
+def test_arbiter_pass_lets_parent_finalize(tmp_path: Path):
+    """Arbiter verdict=pass → _handle_child_result returns without moving the
+    parent; _all_children_passed treats it as a passing terminal subtask."""
+    parent, plan, mas = _seed_revision_cycle_with_disputes(
+        tmp_path, "20260504-p-arb5-aaaa",
+        disputes=[{"evaluator_claim": "c", "implementer_response": "r"}],
+    )
+    plan.subtasks.append(SubtaskSpec(id="arbiter-1", role="arbiter", goal="resolve"))
+    (parent / "plan.json").write_text(plan.model_dump_json())
+
+    arb_dir = parent / "subtasks" / "arbiter-1"
+    arb_dir.mkdir()
+    arb_result = Result(
+        task_id="arbiter-1", status="success", summary="implementer right",
+        verdict="pass",
+    )
+    (arb_dir / "result.json").write_text(arb_result.model_dump_json())
+
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg_with_arbiter())
+    spec = next(s for s in plan.subtasks if s.id == "arbiter-1")
+    _handle_child_result(env, parent, board.read_task(parent), plan, spec, arb_result)
+
+    # Parent stays in doing/ — finalize happens on next tick once
+    # _all_children_passed observes the full chain. Seed the rest as passing.
+    for sid in ("test-1", "impl-1"):
+        d = parent / "subtasks" / sid
+        d.mkdir(exist_ok=True)
+        (d / "result.json").write_text(
+            Result(task_id=sid, status="success", summary="ok").model_dump_json()
+        )
+    eval_dir = parent / "subtasks" / "eval-1"
+    eval_dir.mkdir(exist_ok=True)
+    (eval_dir / "result.json").write_text(
+        Result(task_id="eval-1", status="success", summary="ok",
+               verdict="pass").model_dump_json()
+    )
+    rev_eval_dir = parent / "subtasks" / "rev-1-evaluator"
+    rev_eval_dir.mkdir(exist_ok=True)
+    (rev_eval_dir / "result.json").write_text(
+        Result(task_id="rev-1-evaluator", status="needs_revision",
+               summary="x", verdict="needs_revision", feedback="fb").model_dump_json()
+    )
+    rev_test_dir = parent / "subtasks" / "rev-1-tester"
+    rev_test_dir.mkdir(exist_ok=True)
+    (rev_test_dir / "result.json").write_text(
+        Result(task_id="rev-1-tester", status="success", summary="ok").model_dump_json()
+    )
+
+    assert _all_children_passed(plan, parent / "subtasks") is True
+    assert parent.exists(), "parent should not have moved on arbiter pass"
+
+
+def test_arbiter_fail_moves_parent_to_failed(tmp_path: Path):
+    """Arbiter verdict=fail → parent moves straight to failed/ with reason
+    'arbiter_verdict_fail', no further revision cycles."""
+    parent, plan, mas = _seed_revision_cycle_with_disputes(
+        tmp_path, "20260504-p-arb6-aaaa",
+        disputes=[{"evaluator_claim": "c", "implementer_response": "r"}],
+    )
+    plan.subtasks.append(SubtaskSpec(id="arbiter-1", role="arbiter", goal="resolve"))
+    (parent / "plan.json").write_text(plan.model_dump_json())
+
+    arb_dir = parent / "subtasks" / "arbiter-1"
+    arb_dir.mkdir()
+    arb_result = Result(
+        task_id="arbiter-1", status="success", summary="evaluator right",
+        verdict="fail", feedback="claim was correct",
+    )
+    (arb_dir / "result.json").write_text(arb_result.model_dump_json())
+
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg_with_arbiter())
+    spec = next(s for s in plan.subtasks if s.id == "arbiter-1")
+    _handle_child_result(env, parent, board.read_task(parent), plan, spec, arb_result)
+
+    parent_id = "20260504-p-arb6-aaaa"
+    assert not parent.exists()
+    failed_dir = mas / "tasks" / "failed" / parent_id
+    assert failed_dir.exists()
+    txns = transitions.read_transitions(failed_dir)
+    assert any(t.reason == "arbiter_verdict_fail" for t in txns)
+
+
+def test_arbiter_not_dispatched_twice(tmp_path: Path):
+    """Once an arbiter subtask exists in plan.subtasks, another evaluator
+    needs_revision must not append a second arbiter."""
+    parent, plan, mas = _seed_revision_cycle_with_disputes(
+        tmp_path, "20260504-p-arb7-aaaa",
+        disputes=[{"evaluator_claim": "c", "implementer_response": "r"}],
+    )
+    plan.subtasks.append(SubtaskSpec(id="arbiter-1", role="arbiter", goal="resolve"))
+    (parent / "plan.json").write_text(plan.model_dump_json())
+
+    spec = next(s for s in plan.subtasks if s.id == "rev-1-evaluator")
+    result = Result(
+        task_id="rev-1-evaluator", status="needs_revision",
+        summary="x", verdict="needs_revision", feedback="fb",
+    )
+
+    cfg = _cfg_with_arbiter()
+    cfg.max_replans = 0  # avoid replan branch noise; we want append cycle path
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=cfg)
+    _handle_child_result(env, parent, board.read_task(parent), plan, spec, result)
+
+    refreshed = parse_plan(parent / "plan.json", "20260504-p-arb7-aaaa")
+    assert sum(1 for s in refreshed.subtasks if s.role == "arbiter") == 1
