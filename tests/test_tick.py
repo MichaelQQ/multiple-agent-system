@@ -1254,6 +1254,221 @@ def test_replan_respects_max_replans_cap(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
+# 7c. Convergence detector
+# ---------------------------------------------------------------------------
+
+
+def test_jaccard_similarity_basic():
+    from mas.tick import _jaccard_similarity
+
+    assert _jaccard_similarity("foo bar baz", "foo bar baz") == 1.0
+    assert _jaccard_similarity("foo bar", "qux quux") == 0.0
+    assert _jaccard_similarity("", "anything") == 0.0
+    assert _jaccard_similarity("Foo Bar", "foo bar") == 1.0  # case-insensitive
+    assert 0.3 < _jaccard_similarity("foo bar baz", "foo bar qux") < 0.8
+
+
+def test_detect_convergence_empty_revision_feedback():
+    from mas.tick import _detect_convergence
+
+    plan = Plan(parent_id="p", summary="s", subtasks=[])
+    converged, sim = _detect_convergence(plan, "anything")
+    assert converged is False
+    assert sim == 0.0
+
+
+def test_detect_convergence_picks_latest_cycle_key():
+    from mas.tick import _detect_convergence
+
+    plan = Plan(
+        parent_id="p", summary="s", subtasks=[],
+        revision_feedback={
+            "rev-1": "totally different feedback about widgets",
+            "rev-2": "missing return type on foo bar baz handler",
+        },
+    )
+    # Compares against rev-2, not rev-1.
+    converged, sim = _detect_convergence(plan, "missing return type on foo bar baz handler")
+    assert converged is True
+    assert sim == 1.0
+
+
+def test_handle_child_result_convergence_triggers_replan(tmp_path: Path):
+    """Eval feedback ~identical to last cycle's → replan (when budget allows)."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent_id = "20260430-p-cv1-aaaa"
+    parent = board.task_dir(mas, "doing", parent_id)
+    parent.mkdir(parents=True)
+    board.write_task(parent, Task(id=parent_id, role="orchestrator", goal="g"))
+    subtasks = parent / "subtasks"
+    subtasks.mkdir()
+    (subtasks / "rev-1-evaluator").mkdir()
+
+    plan = Plan(
+        parent_id=parent_id, summary="s",
+        subtasks=[
+            SubtaskSpec(id="test-1", role="tester", goal="t"),
+            SubtaskSpec(id="impl-1", role="implementer", goal="i"),
+            SubtaskSpec(id="eval-1", role="evaluator", goal="e"),
+            SubtaskSpec(id="rev-1-tester", role="tester", goal="r1t"),
+            SubtaskSpec(id="rev-1-implementer", role="implementer", goal="r1i"),
+            SubtaskSpec(id="rev-1-evaluator", role="evaluator", goal="r1e"),
+        ],
+        max_revision_cycles=4,  # high enough that replan-threshold won't fire
+        revision_feedback={"rev-1": "missing null check on user input field"},
+    )
+    (parent / "plan.json").write_text(plan.model_dump_json())
+    (parent / "result.json").write_text(
+        Result(task_id=parent_id, status="success", summary="orch done").model_dump_json()
+    )
+
+    spec = next(s for s in plan.subtasks if s.id == "rev-1-evaluator")
+    result = Result(
+        task_id="rev-1-evaluator", status="needs_revision",
+        summary="still broken", verdict="needs_revision",
+        feedback="missing null check on user input field",  # identical → 1.0
+    )
+
+    cfg = _cfg()  # max_replans=1 default
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=cfg)
+
+    _handle_child_result(env, parent, board.read_task(parent), plan, spec, result)
+
+    # Replan triggered: archived files, replan_count bumped, parent task carries reason
+    assert (parent / ".replan_count").read_text().strip() == "1"
+    assert (parent / "plan.replan-1.json").exists()
+    refreshed = board.read_task(parent)
+    assert "convergence_detected" in refreshed.inputs.get("replan_reason", "")
+
+
+def test_handle_child_result_convergence_fails_when_replan_exhausted(tmp_path: Path):
+    """Convergence with replan budget exhausted → parent moves to failed/."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent_id = "20260430-p-cv2-aaaa"
+    parent = board.task_dir(mas, "doing", parent_id)
+    parent.mkdir(parents=True)
+    board.write_task(parent, Task(id=parent_id, role="orchestrator", goal="g"))
+    (parent / "subtasks" / "rev-1-evaluator").mkdir(parents=True)
+    (parent / ".replan_count").write_text("1")  # budget used
+
+    plan = Plan(
+        parent_id=parent_id, summary="s",
+        subtasks=[
+            SubtaskSpec(id="test-1", role="tester", goal="t"),
+            SubtaskSpec(id="impl-1", role="implementer", goal="i"),
+            SubtaskSpec(id="eval-1", role="evaluator", goal="e"),
+            SubtaskSpec(id="rev-1-tester", role="tester", goal="r1t"),
+            SubtaskSpec(id="rev-1-implementer", role="implementer", goal="r1i"),
+            SubtaskSpec(id="rev-1-evaluator", role="evaluator", goal="r1e"),
+        ],
+        max_revision_cycles=4,
+        revision_feedback={"rev-1": "tests still failing on edge case for empty list"},
+    )
+    (parent / "plan.json").write_text(plan.model_dump_json())
+
+    spec = next(s for s in plan.subtasks if s.id == "rev-1-evaluator")
+    result = Result(
+        task_id="rev-1-evaluator", status="needs_revision",
+        summary="still broken", verdict="needs_revision",
+        feedback="tests still failing on edge case for empty list",
+    )
+
+    cfg = _cfg()  # max_replans=1; already used
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=cfg)
+
+    _handle_child_result(env, parent, board.read_task(parent), plan, spec, result)
+
+    assert not parent.exists()
+    failed_dir = mas / "tasks" / "failed" / parent_id
+    assert failed_dir.exists()
+    txns = transitions.read_transitions(failed_dir)
+    assert any("convergence_detected" in t.reason for t in txns)
+
+
+def test_handle_child_result_no_convergence_appends_normal_cycle(tmp_path: Path):
+    """Dissimilar feedback → falls through to normal revision cycle append."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent_id = "20260430-p-cv3-aaaa"
+    parent = board.task_dir(mas, "doing", parent_id)
+    parent.mkdir(parents=True)
+    board.write_task(parent, Task(id=parent_id, role="orchestrator", goal="g"))
+    (parent / "subtasks" / "rev-1-evaluator").mkdir(parents=True)
+
+    plan = Plan(
+        parent_id=parent_id, summary="s",
+        subtasks=[
+            SubtaskSpec(id="test-1", role="tester", goal="t"),
+            SubtaskSpec(id="impl-1", role="implementer", goal="i"),
+            SubtaskSpec(id="eval-1", role="evaluator", goal="e"),
+            SubtaskSpec(id="rev-1-tester", role="tester", goal="r1t"),
+            SubtaskSpec(id="rev-1-implementer", role="implementer", goal="r1i"),
+            SubtaskSpec(id="rev-1-evaluator", role="evaluator", goal="r1e"),
+        ],
+        max_revision_cycles=4,
+        revision_feedback={"rev-1": "missing null check on user input field"},
+    )
+    (parent / "plan.json").write_text(plan.model_dump_json())
+
+    spec = next(s for s in plan.subtasks if s.id == "rev-1-evaluator")
+    result = Result(
+        task_id="rev-1-evaluator", status="needs_revision",
+        summary="now another issue", verdict="needs_revision",
+        feedback="completely separate concern about pagination ordering",
+    )
+
+    cfg = _cfg()
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=cfg)
+
+    _handle_child_result(env, parent, board.read_task(parent), plan, spec, result)
+
+    # Normal append path: no replan, plan.json still present, rev-2 cycle added
+    assert not (parent / ".replan_count").exists()
+    assert (parent / "plan.json").exists()
+    refreshed_plan = parse_plan(parent / "plan.json", parent_id)
+    assert any(s.id.startswith("rev-2-") for s in refreshed_plan.subtasks)
+
+
+def test_handle_child_result_first_revision_no_convergence(tmp_path: Path):
+    """First failing eval has no prior cycle → convergence skipped, normal append."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent_id = "20260430-p-cv4-aaaa"
+    parent = board.task_dir(mas, "doing", parent_id)
+    parent.mkdir(parents=True)
+    board.write_task(parent, Task(id=parent_id, role="orchestrator", goal="g"))
+    (parent / "subtasks").mkdir()
+
+    plan = Plan(
+        parent_id=parent_id, summary="s",
+        subtasks=[
+            SubtaskSpec(id="test-1", role="tester", goal="t"),
+            SubtaskSpec(id="impl-1", role="implementer", goal="i"),
+            SubtaskSpec(id="eval-1", role="evaluator", goal="e"),
+        ],
+        max_revision_cycles=2,
+    )
+    (parent / "plan.json").write_text(plan.model_dump_json())
+
+    spec = next(s for s in plan.subtasks if s.id == "eval-1")
+    result = Result(
+        task_id="eval-1", status="needs_revision",
+        summary="x", verdict="needs_revision", feedback="any feedback at all",
+    )
+
+    cfg = _cfg()
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=cfg)
+
+    _handle_child_result(env, parent, board.read_task(parent), plan, spec, result)
+
+    assert not (parent / ".replan_count").exists()
+    refreshed_plan = parse_plan(parent / "plan.json", parent_id)
+    assert any(s.id.startswith("rev-1-") for s in refreshed_plan.subtasks)
+
+
+# ---------------------------------------------------------------------------
 # 8. _finalize_parent
 # ---------------------------------------------------------------------------
 

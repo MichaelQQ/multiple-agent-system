@@ -5,6 +5,7 @@ import fcntl
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 from datetime import datetime, timezone
@@ -550,6 +551,15 @@ def _handle_child_result(env, parent_dir, parent_task, plan, spec, result):
     # Evaluator verdict handling
     if spec.role == "evaluator" and result.verdict == "needs_revision":
         feedback = result.feedback or ""
+        converged, sim = _detect_convergence(plan, feedback)
+        if converged:
+            reason = f"convergence_detected jaccard={sim:.2f}"
+            if _read_replan_count(parent_dir) < env.cfg.max_replans:
+                _trigger_replan(env, parent_dir, parent_task, reason=f"{reason}: {feedback}")
+                return
+            failed_dir = env.mas / "tasks" / "failed" / parent_task.id
+            board.move(parent_dir, failed_dir, reason=reason)
+            return
         if _should_trigger_replan(plan, parent_dir, env.cfg.max_replans):
             _trigger_replan(env, parent_dir, parent_task, reason=feedback)
             return
@@ -601,6 +611,33 @@ def _handle_child_result(env, parent_dir, parent_task, plan, spec, result):
     # Retries exhausted → move parent to failed/
     failed_dir = env.mas / "tasks" / "failed" / parent_task.id
     board.move(parent_dir, failed_dir, reason="max_retries_exceeded")
+
+
+CONVERGENCE_THRESHOLD = 0.85
+
+
+def _tokenize(text: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9]+", (text or "").lower()))
+
+
+def _jaccard_similarity(a: str, b: str) -> float:
+    ta, tb = _tokenize(a), _tokenize(b)
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / len(ta | tb)
+
+
+def _detect_convergence(plan: Plan, current_feedback: str) -> tuple[bool, float]:
+    """Compare current evaluator feedback to the most recent prior cycle's.
+
+    Returns (converged, similarity). Converged when similarity >= threshold,
+    signalling the loop is repeating itself rather than making progress.
+    """
+    if not plan.revision_feedback:
+        return False, 0.0
+    last_key = max(plan.revision_feedback.keys(), key=lambda k: int(k.split("-")[1]))
+    sim = _jaccard_similarity(current_feedback, plan.revision_feedback[last_key])
+    return sim >= CONVERGENCE_THRESHOLD, sim
 
 
 def _read_replan_count(parent_dir: Path) -> int:
