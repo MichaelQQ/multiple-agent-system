@@ -35,6 +35,8 @@ $constraints_json
 Your working directory is the git worktree: $worktree
 Write your outputs into the task directory (absolute path): $task_dir
 
+$consensus_block
+
 ## Output
 
 Write `$task_dir/plan.json` as:

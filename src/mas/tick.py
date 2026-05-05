@@ -1313,6 +1313,47 @@ def _maybe_dispatch_proposer(env: TickEnv) -> None:
 # --- Dispatch helper --------------------------------------------------------
 
 
+def _consensus_enabled(cfg: MasConfig, task: Task) -> bool:
+    """True when this task's cost budget meets the configured plan-consensus
+    threshold. Falls back to `default_cost_budget_usd` when the task itself
+    carries no per-task budget. Disabled when threshold is unset."""
+    threshold = cfg.plan_consensus_threshold_usd
+    if threshold is None:
+        return False
+    budget = task.cost_budget_usd
+    if budget is None:
+        budget = cfg.default_cost_budget_usd
+    if budget is None:
+        return False
+    return budget >= threshold
+
+
+def _consensus_prompt_block(task_dir: Path) -> str:
+    """Prompt addendum injected via $consensus_block when plan-time consensus
+    is gated on. Asks the orchestrator to draft two distinct plan variants,
+    compare them, and write the chosen variant as plan.json plus a sidecar
+    `plan_pick.json` capturing the rationale and discarded variant id."""
+    return (
+        "## Plan-time consensus mode\n"
+        "\n"
+        "This task's cost budget is high enough to justify a two-variant plan.\n"
+        "Before writing `plan.json`, do the following:\n"
+        "\n"
+        f"1. Independently draft two complete Plan variants and save them as\n"
+        f"   `{task_dir}/plan_variant_a.json` and `{task_dir}/plan_variant_b.json`.\n"
+        "   The two variants MUST differ meaningfully (decomposition, test\n"
+        "   strategy, or implementation approach) — not near-duplicates.\n"
+        "2. Compare them in a short rationale (≤200 words): which variant is\n"
+        "   more robust, and why.\n"
+        "3. Write the chosen variant verbatim to `plan.json`. Write the\n"
+        "   rationale and discarded variant id to `plan_pick.json`:\n"
+        "\n"
+        '   {"chosen": "a"|"b", "rationale": "..."}\n'
+        "\n"
+        "Treat each variant as a candidate you'd ship — no half-baked drafts.\n"
+    )
+
+
 def _dry_run_prompt_block(role: str, task_dir: Path) -> str:
     """Prompt addendum injected via $dry_run_block when --dry-run-child is on.
 
@@ -1376,6 +1417,10 @@ def _dispatch_role(
     dry_run_active = env.dry_run_child and role in ("implementer", "tester")
     dry_run_block = _dry_run_prompt_block(role, task_dir) if dry_run_active else ""
 
+    consensus_block = ""
+    if role == "orchestrator" and _consensus_enabled(env.cfg, task):
+        consensus_block = _consensus_prompt_block(task_dir)
+
     # Render prompt
     prompt_path = env.mas / "prompts" / f"{role}.md"
     if not prompt_path.exists():
@@ -1390,6 +1435,7 @@ def _dispatch_role(
             mas_dir=str(env.mas),
             parent_summary=parent_summary,
             dry_run_block=dry_run_block,
+            consensus_block=consensus_block,
         )
 
     attempt = task.attempt
