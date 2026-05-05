@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
-from . import audit, board, current_subtask, graph as _graph, state as _state, transitions, worktree
+from . import audit, board, current_subtask, graph as _graph, state as _state, summary as _summary, transitions, worktree
 from .adapters import AdapterUnavailableError, get_adapter
 from .config import load_config, project_root, project_dir, validate_config, ConfigWatcher
 from .ids import task_id as new_task_id
@@ -302,6 +302,7 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
         )
         _graph.update_node_from_result(graph, next_child, result)
         _graph.write_graph(parent_dir, graph)
+        _summary.maybe_write_summary(parent_dir, parent_task.goal)
         _handle_child_result(env, parent_dir, parent_task, plan, next_child, result)
         return
 
@@ -1325,6 +1326,13 @@ def _dispatch_role(
 
     board.write_task(task_dir, task)
 
+    # Hierarchical summary: when this is a child subtask and the parent has
+    # already accumulated enough done subtasks for summary.md to exist, swap
+    # the full prior_results history out for the digest.
+    parent_summary = ""
+    if task.parent_id:
+        parent_summary = _summary.read_summary(task_dir.parent.parent) or ""
+
     # Render prompt
     prompt_path = env.mas / "prompts" / f"{role}.md"
     if not prompt_path.exists():
@@ -1337,6 +1345,7 @@ def _dispatch_role(
             task_dir=str(task_dir),
             worktree=str(cwd),
             mas_dir=str(env.mas),
+            parent_summary=parent_summary,
         )
 
     attempt = task.attempt

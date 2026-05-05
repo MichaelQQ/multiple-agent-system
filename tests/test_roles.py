@@ -154,6 +154,48 @@ Unmatched: $unmatched_var
         assert "task_id" in result
         assert "status" in result
 
+    def test_parent_summary_substitutes_when_provided(self, tmp_path):
+        tmpl = tmp_path / "tmpl.txt"
+        tmpl.write_text(
+            "Summary:\n$parent_summary\n---\nPriors:\n$prior_results_json\n"
+        )
+        task = Task(
+            id="20260415-t1-aaaa",
+            role="implementer",
+            goal="g",
+            prior_results=[
+                Result(task_id="old1", status="success", summary="old work 1"),
+                Result(task_id="old2", status="success", summary="old work 2"),
+                Result(task_id="old3", status="success", summary="old work 3"),
+                Result(task_id="latest", status="success", summary="most recent"),
+            ],
+        )
+        out = render_prompt(
+            tmpl, task, parent_summary="# digest\nfrom 6 subtasks"
+        )
+        assert "# digest" in out
+        assert "from 6 subtasks" in out
+        # When summary is present we keep only the last 2 priors verbatim
+        assert "latest" in out
+        assert "most recent" in out
+        assert "old1" not in out
+        assert "old work 1" not in out
+
+    def test_parent_summary_empty_keeps_full_priors(self, tmp_path):
+        tmpl = tmp_path / "tmpl.txt"
+        tmpl.write_text("Summary:[$parent_summary]\nPriors:$prior_results_json\n")
+        task = Task(
+            id="20260415-t1-aaaa",
+            role="implementer",
+            goal="g",
+            prior_results=[
+                Result(task_id="r1", status="success", summary="r1"),
+            ],
+        )
+        out = render_prompt(tmpl, task)
+        assert "Summary:[]" in out
+        assert "r1" in out
+
 
 class TestCompressPriorResults:
     """Tests for compress_prior_results truncation helper."""

@@ -11,6 +11,9 @@ $inputs_json
 Constraints:
 $constraints_json
 
+Parent task summary (history digest; only the last 2 prior results are shown verbatim below):
+$parent_summary
+
 Prior subtask results (in plan order):
 $prior_results_json
 

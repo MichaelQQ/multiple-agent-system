@@ -139,9 +139,18 @@ def compress_prior_results(
     return compressed
 
 
-def render_prompt(template_path: Path, task: Task, **extra: Any) -> str:
+def render_prompt(
+    template_path: Path,
+    task: Task,
+    *,
+    parent_summary: str | None = None,
+    **extra: Any,
+) -> str:
     tmpl = Template(template_path.read_text())
-    priors = compress_prior_results(task.prior_results)
+    if parent_summary:
+        priors = task.prior_results[-2:]
+    else:
+        priors = compress_prior_results(task.prior_results)
     prior_results_json = json.dumps(
         [r.model_dump(mode="json", exclude_none=True) for r in priors],
         indent=2,
@@ -157,6 +166,7 @@ def render_prompt(template_path: Path, task: Task, **extra: Any) -> str:
         "inputs_json": json.dumps(task.inputs, indent=2),
         "constraints_json": json.dumps(task.constraints, indent=2),
         "prior_results_json": prior_results_json,
+        "parent_summary": parent_summary or "",
         "result_schema": _RESULT_SCHEMA_HINT,
     }
     vars_.update({k: str(v) for k, v in extra.items()})

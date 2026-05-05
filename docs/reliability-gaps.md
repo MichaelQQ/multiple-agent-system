@@ -98,7 +98,7 @@ Effort: S (trace) + M (patterns).
 - [x] **13.** Optional `arbiter` role for structured disagreement resolution (gap 3)
 - [x] **14.** Optional N-of-M evaluator quorum (`roles.evaluator.quorum: 2`) (gap 1)
 - [x] **15.** `graph.json` task graph replacing flat `prior_results` (gap 2)
-- [ ] **16.** Hierarchical summary for parents with >5 done subtasks (gap 6)
+- [x] **16.** Hierarchical summary for parents with >5 done subtasks (gap 6)
 - [ ] **17.** Extend `trace.py` → `mas trace <task_id>` rendering graph + transitions + cost (gap 7)
 - [ ] **18.** `.mas/patterns.jsonl` failure-pattern index, consumed by proposer (gap 7)
 - [ ] **19.** `mas tick --dry-run-child` mode with `proposed_diff.patch` apply gate (gap 5)
