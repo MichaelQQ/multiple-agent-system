@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
-from . import audit, board, current_subtask, state as _state, transitions, worktree
+from . import audit, board, current_subtask, graph as _graph, state as _state, transitions, worktree
 from .adapters import AdapterUnavailableError, get_adapter
 from .config import load_config, project_root, project_dir, validate_config, ConfigWatcher
 from .ids import task_id as new_task_id
@@ -239,6 +239,12 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
     subtasks_root = parent_dir / "subtasks"
     subtasks_root.mkdir(exist_ok=True)
 
+    graph = _graph.read_graph(parent_dir)
+    graph_changed = _graph.sync_from_plan(graph, plan)
+    graph_changed |= _backfill_graph_from_disk(graph, plan, subtasks_root)
+    if graph_changed:
+        _graph.write_graph(parent_dir, graph)
+
     # Sequential: find first subtask without successful result.
     next_child = _next_ready_child(plan, subtasks_root)
     if next_child is None:
@@ -294,6 +300,8 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
         _state.update_state_from_result(
             parent_dir, next_child, result, worktree=wt, attempt=child_attempt
         )
+        _graph.update_node_from_result(graph, next_child, result)
+        _graph.write_graph(parent_dir, graph)
         _handle_child_result(env, parent_dir, parent_task, plan, next_child, result)
         return
 
@@ -313,7 +321,9 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
         goal=next_child.goal,
         inputs=resolved_inputs,
         constraints=next_child.constraints,
-        prior_results=_collect_prior_results(plan, next_child.id, subtasks_root),
+        prior_results=_collect_prior_results(
+            plan, next_child.id, subtasks_root, parent_dir=parent_dir
+        ),
         cycle=parent_task.cycle,
         attempt=child_attempt,
     )
@@ -365,24 +375,58 @@ def _resolve_test_command(
     return None
 
 
-def _collect_prior_results(plan: Plan, current_id: str, subtasks_root: Path) -> list[Result]:
+def _backfill_graph_from_disk(graph, plan: Plan, subtasks_root: Path) -> bool:
+    """For any graph node with status=None whose subtask has a result.json on
+    disk, fold that result into the graph. Covers two cases: parents that
+    pre-date graph.json and races where a child completed in a tick before
+    update_node_from_result fires (e.g. when sync runs first on a fresh
+    plan)."""
+    changed = False
+    by_id = {n.subtask_id: n for n in graph.nodes}
+    for spec in plan.subtasks:
+        node = by_id.get(spec.id)
+        if node is None or node.status is not None:
+            continue
+        r = board.read_result(subtasks_root / spec.id)
+        if r is None:
+            continue
+        if _graph.update_node_from_result(graph, spec, r):
+            changed = True
+    return changed
+
+
+def _collect_prior_results(
+    plan: Plan,
+    current_id: str,
+    subtasks_root: Path,
+    *,
+    parent_dir: Path | None = None,
+) -> list[Result]:
     """Return prior results sliced to entries relevant to the current subtask.
 
-    Walks plan.subtasks up to (but excluding) `current_id`, reads each
-    available result, then applies `retrieval_slice` keyed on the current
-    subtask's role and filename references in its inputs.
+    Sources nodes from `parent_dir/graph.json` (causality-annotated). Falls
+    back to walking plan.subtasks + reading each result.json when the graph
+    isn't available — this keeps tests that bypass the graph build path
+    (constructing a Plan directly without a tick) working.
     """
     from .roles import extract_filename_refs, retrieval_slice
 
     current_spec = next((s for s in plan.subtasks if s.id == current_id), None)
 
-    candidates: list[tuple[str, Result]] = []
-    for spec in plan.subtasks:
-        if spec.id == current_id:
-            break
-        r = board.read_result(subtasks_root / spec.id)
-        if r is not None:
-            candidates.append((spec.role, r))
+    if parent_dir is None:
+        parent_dir = subtasks_root.parent
+
+    graph = _graph.read_graph(parent_dir)
+    if graph.nodes:
+        candidates = _graph.derive_prior_results(graph, plan, current_id)
+    else:
+        candidates = []
+        for spec in plan.subtasks:
+            if spec.id == current_id:
+                break
+            r = board.read_result(subtasks_root / spec.id)
+            if r is not None:
+                candidates.append((spec.role, r))
 
     if current_spec is None:
         return [r for _, r in candidates]
@@ -728,6 +772,9 @@ def _trigger_replan(env: TickEnv, parent_dir: Path, parent_task: Task, reason: s
     subtasks_dir = parent_dir / "subtasks"
     if subtasks_dir.exists():
         subtasks_dir.rename(parent_dir / f"subtasks.replan-{n}")
+    graph_p = _graph.graph_path(parent_dir)
+    if graph_p.exists():
+        graph_p.rename(parent_dir / f"graph.replan-{n}.json")
     parent_result = parent_dir / "result.json"
     if parent_result.exists():
         parent_result.rename(parent_dir / f"result.replan-{n}.json")
@@ -817,8 +864,20 @@ def _append_arbiter_subtask(
             "parent_goal": parent_task.goal,
         },
     )
+    failing_eval_id = next(
+        (s.id for s in reversed(plan.subtasks) if s.role == "evaluator"),
+        None,
+    )
     plan.subtasks.append(spec)
     (parent_dir / "plan.json").write_text(plan.model_dump_json(indent=2))
+
+    g = _graph.read_graph(parent_dir)
+    _graph.sync_from_plan(g, plan)
+    if failing_eval_id is not None:
+        _graph.add_arbiter_link(
+            g, from_evaluator_id=failing_eval_id, arbiter_id=spec.id, feedback=feedback
+        )
+    _graph.write_graph(parent_dir, g)
 
 
 def _append_revision_cycle(
@@ -844,10 +903,28 @@ def _append_revision_cycle(
         SubtaskSpec(id=f"{cycle_key}-evaluator", role="evaluator",
                     goal=f"Evaluate revision {cycle_n}", inputs=ref_inputs),
     ]
+    # The evaluator that triggered this revision is the most recent
+    # evaluator-or-quorum subtask preceding the new cycle.
+    failing_eval_id = next(
+        (s.id for s in reversed(plan.subtasks) if s.role == "evaluator"),
+        None,
+    )
+
     plan.subtasks.extend(new_children)
     if cfg is not None:
         _expand_evaluator_quorum(plan, cfg)
     (parent_dir / "plan.json").write_text(plan.model_dump_json(indent=2))
+
+    g = _graph.read_graph(parent_dir)
+    _graph.sync_from_plan(g, plan)
+    if failing_eval_id is not None:
+        _graph.add_revision_link(
+            g,
+            from_evaluator_id=failing_eval_id,
+            new_subtask_ids=[c.id for c in new_children],
+            feedback=feedback,
+        )
+    _graph.write_graph(parent_dir, g)
     return True
 
 

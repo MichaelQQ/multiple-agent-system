@@ -615,6 +615,121 @@ def test_dispatch_injects_prior_results_into_task_json(tmp_path: Path):
     assert impl_task.prior_results[0].handoff["test_command"] == "pytest -q"
 
 
+def test_advance_writes_graph_json_with_nodes_and_sequence_edges(tmp_path: Path):
+    """Advancing a parent with a fresh plan writes graph.json with one node
+    per subtask and sequence edges between adjacent ones."""
+    from mas.graph import read_graph
+
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent = board.task_dir(mas, "doing", "20260504-p-gw-aaaa")
+    parent.mkdir(parents=True)
+    board.write_task(parent, Task(id="20260504-p-gw-aaaa", role="orchestrator", goal="g"))
+    (parent / "worktree").mkdir()
+    plan = Plan(
+        parent_id="20260504-p-gw-aaaa", summary="s",
+        subtasks=[
+            SubtaskSpec(id="20260504-test-1-aaaa", role="tester", goal="t"),
+            SubtaskSpec(id="20260504-impl-1-aaaa", role="implementer", goal="i"),
+        ],
+    )
+    (parent / "plan.json").write_text(plan.model_dump_json())
+    subtasks = parent / "subtasks"
+    test_dir = subtasks / "20260504-test-1-aaaa"
+    test_dir.mkdir(parents=True)
+    (test_dir / "result.json").write_text(
+        Result(task_id="20260504-test-1-aaaa", status="success", summary="green",
+               handoff={"test_command": "pytest -q"}).model_dump_json()
+    )
+
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg())
+    with patch("mas.tick.get_adapter") as mock_get, \
+         patch("mas.board.count_active_pids", return_value=0), \
+         patch("mas.board.write_pid"):
+        mock_adapter = MagicMock()
+        mock_adapter.dispatch.return_value = MagicMock(pid=1)
+        mock_adapter.agentic = False
+        mock_get.return_value.return_value = mock_adapter
+        _advance_one(env, parent)
+
+    g = read_graph(parent)
+    ids = [n.subtask_id for n in g.nodes]
+    assert ids == ["20260504-test-1-aaaa", "20260504-impl-1-aaaa"]
+    # Backfill: tester's on-disk result is folded into its node on first sync.
+    tester_node = next(n for n in g.nodes if n.subtask_id == "20260504-test-1-aaaa")
+    assert tester_node.status == "success"
+    assert tester_node.handoff == {"test_command": "pytest -q"}
+    seq = [(e.from_id, e.to_id) for e in g.edges if e.kind == "sequence"]
+    assert seq == [("20260504-test-1-aaaa", "20260504-impl-1-aaaa")]
+
+
+def test_collect_prior_results_uses_graph_when_present(tmp_path: Path):
+    """When graph.json is populated, `_collect_prior_results` derives priors
+    from it (not from result.json on disk) so causality from revision edges
+    is reflected in the returned Results."""
+    from mas import graph as _graph
+
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent = board.task_dir(mas, "doing", "20260504-p-cg-aaaa")
+    parent.mkdir(parents=True)
+    subtasks = parent / "subtasks"
+    subtasks.mkdir()
+    plan = Plan(
+        parent_id="20260504-p-cg-aaaa", summary="s",
+        subtasks=[
+            SubtaskSpec(id="e-1", role="evaluator", goal="e"),
+            SubtaskSpec(id="rev-1-implementer", role="implementer", goal="ri"),
+            SubtaskSpec(id="rev-1-evaluator", role="evaluator", goal="re"),
+        ],
+    )
+
+    g = _graph.Graph()
+    _graph.sync_from_plan(g, plan)
+    _graph.update_node_from_result(g, plan.subtasks[0],
+        Result(task_id="e-1", status="success", verdict="needs_revision",
+               summary="thin", feedback="add coverage for Y"))
+    _graph.add_revision_link(
+        g, from_evaluator_id="e-1",
+        new_subtask_ids=["rev-1-implementer", "rev-1-evaluator"],
+        feedback="add coverage for Y",
+    )
+    _graph.update_node_from_result(g, plan.subtasks[1],
+        Result(task_id="rev-1-implementer", status="success", summary="patched"))
+    _graph.write_graph(parent, g)
+
+    priors = _collect_prior_results(
+        plan, "rev-1-evaluator", subtasks, parent_dir=parent
+    )
+    impl = next(r for r in priors if r.task_id == "rev-1-implementer")
+    assert impl.feedback is not None
+    assert "[caused by e-1 (revision)" in impl.feedback
+    assert "add coverage for Y" in impl.feedback
+
+
+def test_trigger_replan_archives_graph_json(tmp_path: Path):
+    """Replan moves graph.json → graph.replan-{N}.json so the next planning
+    pass starts with a fresh graph."""
+    from mas.graph import graph_path
+    from mas.tick import _trigger_replan
+
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent_id = "20260504-p-rp-aaaa"
+    parent = board.task_dir(mas, "doing", parent_id)
+    parent.mkdir(parents=True)
+    board.write_task(parent, Task(id=parent_id, role="orchestrator", goal="g"))
+    (parent / "plan.json").write_text("{}")
+    (parent / "subtasks").mkdir()
+    graph_path(parent).write_text('{"nodes": [], "edges": []}')
+
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg())
+    _trigger_replan(env, parent, board.read_task(parent), reason="r")
+
+    assert not graph_path(parent).exists()
+    assert (parent / "graph.replan-1.json").exists()
+
+
 # ---------------------------------------------------------------------------
 # 5. _handle_child_result
 # ---------------------------------------------------------------------------
@@ -1023,6 +1138,36 @@ def test_append_revision_cycle_returns_true_when_appended(tmp_path: Path):
 
     appended = _append_revision_cycle(parent, plan, board.read_task(parent), "fb")
     assert appended is True
+
+
+def test_append_revision_cycle_writes_graph_with_revision_edges(tmp_path: Path):
+    """Appending a revision cycle records `revision` edges from the failing
+    evaluator to each new subtask, with feedback as the edge reason."""
+    from mas.graph import read_graph
+
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent = board.task_dir(mas, "doing", "20260504-p-gr-aaaa")
+    parent.mkdir(parents=True)
+    board.write_task(parent, Task(id="20260504-p-gr-aaaa", role="orchestrator", goal="g"))
+    (parent / "subtasks").mkdir()
+    plan = Plan(parent_id="20260504-p-gr-aaaa", summary="s",
+                subtasks=[SubtaskSpec(id="20260504-eval-1-aaaa", role="evaluator", goal="e")],
+                max_revision_cycles=2)
+    (parent / "plan.json").write_text(plan.model_dump_json())
+
+    feedback = "missing edge case Y"
+    _append_revision_cycle(parent, plan, board.read_task(parent), feedback)
+
+    g = read_graph(parent)
+    rev_edges = [(e.from_id, e.to_id, e.reason) for e in g.edges if e.kind == "revision"]
+    assert ("20260504-eval-1-aaaa", "rev-1-tester", feedback) in rev_edges
+    assert ("20260504-eval-1-aaaa", "rev-1-implementer", feedback) in rev_edges
+    assert ("20260504-eval-1-aaaa", "rev-1-evaluator", feedback) in rev_edges
+    # Sequence edges synced from plan order.
+    seq_edges = {(e.from_id, e.to_id) for e in g.edges if e.kind == "sequence"}
+    assert ("rev-1-tester", "rev-1-implementer") in seq_edges
+    assert ("rev-1-implementer", "rev-1-evaluator") in seq_edges
 
 
 def test_handle_child_result_moves_parent_to_failed_when_cycles_exhausted(tmp_path: Path):
