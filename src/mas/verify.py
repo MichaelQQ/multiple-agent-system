@@ -97,12 +97,17 @@ def verify_child_result(
     result: Result,
     child_dir: Path,
     attempt: int,
+    *,
+    dry_run: bool = False,
 ) -> Result:
     """Return the result unchanged if it passes verification, or a coerced
     Result (status=failure or environment_error) if it does not.
 
     Only applies to tester/implementer success claims; evaluator, orchestrator,
-    and docs-only subtasks are passed through."""
+    and docs-only subtasks are passed through. When `dry_run` is True the
+    log-mentions check is skipped — the agent emits a patch instead of running
+    the test command, and `apply_proposed_diff` + `verify_implementer_test_rerun`
+    take over as the truth source post-apply."""
     if result.status != "success":
         return result
     if spec.role not in ("tester", "implementer"):
@@ -145,6 +150,9 @@ def verify_child_result(
             f"{spec.role} log shows sandbox/permission block — self-reported exit code is unverified",
             status="environment_error",
         )
+
+    if dry_run:
+        return result
 
     # Derive the test runner's executable name from whichever handoff supplies
     # test_command (tester supplies it directly; implementer may omit it). If
@@ -637,6 +645,131 @@ def verify_allowed_paths(
         f"{spec.role} touched files outside allowed_paths={list(allowed)}: "
         f"{shown}{suffix}",
     )
+
+
+_DRY_RUN_PATCH_FILENAME = "proposed_diff.patch"
+
+
+def _patch_paths_from_numstat(numstat_output: str) -> list[str]:
+    """Parse `git apply --numstat` output into the set of file paths the patch
+    affects. Handles rename forms `{old => new}` and `old => new` by yielding
+    both sides so the allowlist check rejects renames that escape it."""
+    paths: list[str] = []
+    for line in numstat_output.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        raw = parts[2].strip()
+        if not raw:
+            continue
+        if "{" in raw and "}" in raw and " => " in raw:
+            m = re.match(r"^(.*)\{(.*) => (.*)\}(.*)$", raw)
+            if m:
+                prefix, old, new, suffix = m.groups()
+                paths.append((prefix + old + suffix).strip())
+                paths.append((prefix + new + suffix).strip())
+                continue
+        if " => " in raw:
+            old, new = raw.split(" => ", 1)
+            paths.append(old.strip())
+            paths.append(new.strip())
+            continue
+        paths.append(raw)
+    return paths
+
+
+def apply_proposed_diff(
+    spec: SubtaskSpec,
+    result: Result,
+    worktree: Path,
+    child_dir: Path,
+) -> Result:
+    """Dry-run-child gate: read `child_dir/proposed_diff.patch`, validate it
+    parses cleanly via `git apply --check`, validate every changed file lies
+    within `spec.constraints.allowed_paths` (when set), then apply with
+    `git apply` so downstream verification (test re-run, etc.) sees the
+    materialized changes.
+
+    Skipped when the result is not a successful claim or the spec's role does
+    not mutate the worktree (anything other than implementer/tester). On any
+    failure the result is coerced to status=failure with a reason describing
+    which gate rejected the patch.
+    """
+    if result.status != "success":
+        return result
+    if spec.role not in ("implementer", "tester"):
+        return result
+    if _is_docs_only(spec):
+        return result
+    if not worktree.is_dir():
+        return _coerce(
+            result,
+            f"dry-run: worktree missing at {worktree} — cannot apply proposed_diff.patch",
+        )
+
+    patch_path = child_dir / _DRY_RUN_PATCH_FILENAME
+    if not patch_path.exists():
+        return _coerce(
+            result,
+            f"dry-run: {spec.role} reported success but no {_DRY_RUN_PATCH_FILENAME} "
+            f"was written to {child_dir}",
+        )
+
+    try:
+        check = subprocess.run(
+            ["git", "-C", str(worktree), "apply", "--check", str(patch_path)],
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return _coerce(result, f"dry-run: git apply --check failed to start: {e}")
+    if check.returncode != 0:
+        return _coerce(
+            result,
+            f"dry-run: proposed_diff.patch failed git apply --check:\n"
+            f"{(check.stderr or check.stdout).strip()}",
+        )
+
+    constraints = spec.constraints or {}
+    allowed = constraints.get("allowed_paths")
+    if allowed and isinstance(allowed, list):
+        try:
+            numstat = subprocess.run(
+                ["git", "-C", str(worktree), "apply", "--numstat", str(patch_path)],
+                capture_output=True, text=True, timeout=30, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return _coerce(result, f"dry-run: git apply --numstat failed to start: {e}")
+        if numstat.returncode != 0:
+            return _coerce(
+                result,
+                f"dry-run: git apply --numstat failed:\n{(numstat.stderr or numstat.stdout).strip()}",
+            )
+        touched = _patch_paths_from_numstat(numstat.stdout)
+        violations = sorted({f for f in touched if not _path_allowed(f, allowed)})
+        if violations:
+            shown = violations[:10]
+            suffix = f" (+{len(violations) - 10} more)" if len(violations) > 10 else ""
+            return _coerce(
+                result,
+                f"dry-run: proposed_diff.patch touches files outside "
+                f"allowed_paths={list(allowed)}: {shown}{suffix}",
+            )
+
+    try:
+        apply = subprocess.run(
+            ["git", "-C", str(worktree), "apply", str(patch_path)],
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return _coerce(result, f"dry-run: git apply failed to start: {e}")
+    if apply.returncode != 0:
+        return _coerce(
+            result,
+            f"dry-run: git apply failed despite --check passing:\n"
+            f"{(apply.stderr or apply.stdout).strip()}",
+        )
+
+    return result
 
 
 def _grep_count(worktree: Path, pattern: str, glob: str) -> int:

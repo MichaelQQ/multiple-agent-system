@@ -22,6 +22,8 @@ $prior_results_json
 Previous failure (if any):
 $previous_failure
 
+$dry_run_block
+
 ## Rules
 
 - The most recent tester result in `prior_results_json` has a `handoff` with

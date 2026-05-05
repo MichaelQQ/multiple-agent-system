@@ -171,12 +171,21 @@ def _maybe_restart_daemon(*, assume_yes: bool) -> None:
 @app.command()
 def tick(
     verbose: bool = typer.Option(False, "--verbose", help="Enable verbose (DEBUG) logging"),
+    dry_run_child: bool = typer.Option(
+        False,
+        "--dry-run-child",
+        help=(
+            "Dispatch implementer/tester children with MAS_DRY_RUN=1 so they emit "
+            "proposed_diff.patch instead of mutating the worktree. Tick gates apply: "
+            "patch must parse and stay within constraints.allowed_paths."
+        ),
+    ),
 ) -> None:
     """Run a single tick of the orchestrator."""
     setup_logging(logging.DEBUG if verbose else logging.INFO)
     from .tick import run_tick
 
-    run_tick()
+    run_tick(dry_run_child=dry_run_child)
 
 
 @app.command()

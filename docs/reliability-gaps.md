@@ -101,5 +101,5 @@ Effort: S (trace) + M (patterns).
 - [x] **16.** Hierarchical summary for parents with >5 done subtasks (gap 6)
 - [x] **17.** Extend `trace.py` → `mas trace <task_id>` rendering graph + transitions + cost (gap 7)
 - [x] **18.** `.mas/patterns.jsonl` failure-pattern index, consumed by proposer (gap 7)
-- [ ] **19.** `mas tick --dry-run-child` mode with `proposed_diff.patch` apply gate (gap 5)
+- [x] **19.** `mas tick --dry-run-child` mode with `proposed_diff.patch` apply gate (gap 5)
 - [ ] **20.** Plan-time consensus (2 plan variants, second-pass picker) — gated on `cost_budget_usd` (gap 3)

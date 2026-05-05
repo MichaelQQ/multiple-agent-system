@@ -113,7 +113,7 @@ def test_dispatch_role_handles_adapter_unavailable(tmp_path: Path):
         def health_check(self) -> bool:
             return True
 
-        def dispatch(self, prompt, task_dir, cwd, log_path, role, stdin_text=None):
+        def dispatch(self, prompt, task_dir, cwd, log_path, role, stdin_text=None, **_):
             raise AdapterUnavailableError("mock provider unavailable")
 
     with patch("mas.tick.get_adapter", return_value=FailingAdapter):

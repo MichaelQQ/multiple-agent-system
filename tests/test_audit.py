@@ -45,7 +45,7 @@ def _cfg(max_retries: int = 2) -> MasConfig:
     )
 
 
-def _fake_dispatch(self, prompt, task_dir, cwd, log_path, role, stdin_text=None):
+def _fake_dispatch(self, prompt, task_dir, cwd, log_path, role, stdin_text=None, **_):
     """Drop-in for Adapter.dispatch that avoids spawning a real subprocess."""
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_path.touch()

@@ -20,6 +20,8 @@ $prior_results_json
 Previous failure (if any):
 $previous_failure
 
+$dry_run_block
+
 ## What "success" means here
 
 Tests must **run** and fail for the **right reason** — an assertion about the

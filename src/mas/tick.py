@@ -35,6 +35,7 @@ class TickEnv(BaseModel):
     mas: Path
     cfg: MasConfig
     paused: bool = False
+    dry_run_child: bool = False
 
 
 def _acquire_lock(mas_dir: Path):
@@ -51,7 +52,12 @@ def _acquire_lock(mas_dir: Path):
     return fh
 
 
-def run_tick(*, start: Path | None = None, cfg: "MasConfig" | None = None) -> None:
+def run_tick(
+    *,
+    start: Path | None = None,
+    cfg: "MasConfig" | None = None,
+    dry_run_child: bool = False,
+) -> None:
     project_root_path = project_root(start)
     mas = project_dir(start)
     if start is not None and (start / ".git").is_dir():
@@ -68,7 +74,7 @@ def run_tick(*, start: Path | None = None, cfg: "MasConfig" | None = None) -> No
         raise ValueError(f"Validation failed: {issue_msgs}")
 
     paused = (mas / "PAUSED").exists()
-    env = TickEnv(repo=repo, mas=mas, cfg=cfg, paused=paused)
+    env = TickEnv(repo=repo, mas=mas, cfg=cfg, paused=paused, dry_run_child=dry_run_child)
     board.ensure_layout(mas)
 
     try:
@@ -292,7 +298,12 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
     if result is not None:
         current_subtask._delete_current_subtask_marker(parent_dir)
         from . import verify as _verify
-        result = _verify.verify_child_result(next_child, result, child_dir, child_attempt)
+        dry_run_active = env.dry_run_child and next_child.role in ("implementer", "tester")
+        result = _verify.verify_child_result(
+            next_child, result, child_dir, child_attempt, dry_run=dry_run_active
+        )
+        if dry_run_active:
+            result = _verify.apply_proposed_diff(next_child, result, wt, child_dir)
         result = _verify.verify_allowed_paths(next_child, result, wt, child_dir)
         if next_child.role == "evaluator":
             result = _verify.verify_evaluator_result(next_child, result, wt)
@@ -1302,6 +1313,33 @@ def _maybe_dispatch_proposer(env: TickEnv) -> None:
 # --- Dispatch helper --------------------------------------------------------
 
 
+def _dry_run_prompt_block(role: str, task_dir: Path) -> str:
+    """Prompt addendum injected via $dry_run_block when --dry-run-child is on.
+
+    Tells the agent the worktree is read-only this run and that the unified
+    diff it would have applied must be written to `proposed_diff.patch` for
+    tick to gate (parse + allowed_paths) and apply on its behalf."""
+    return (
+        "## Dry-run mode (MAS_DRY_RUN=1 is set)\n"
+        "\n"
+        f"Do **not** modify any file in the worktree. Instead, generate a unified\n"
+        f"diff describing the change you would make (relative to the worktree HEAD,\n"
+        f"using `git diff` format with `a/`/`b/` prefixes) and write it to:\n"
+        f"\n"
+        f"  {task_dir}/proposed_diff.patch\n"
+        f"\n"
+        "The orchestrator will validate the patch with `git apply --check`,\n"
+        "enforce `constraints.allowed_paths` on every touched file, and apply it\n"
+        "in the worktree. If the patch fails to parse or escapes the allowlist,\n"
+        "your result will be coerced to failure regardless of `status`.\n"
+        "\n"
+        "Still write `result.json` as usual; populate `handoff` with the same\n"
+        "fields you'd produce in normal mode (e.g. `final_exit_code` is the\n"
+        "exit code you expect after the patch is applied — tick will re-run\n"
+        "the test command to verify).\n"
+    )
+
+
 def _dispatch_role(
     env: TickEnv,
     task: Task,
@@ -1335,6 +1373,9 @@ def _dispatch_role(
     if task.parent_id:
         parent_summary = _summary.read_summary(task_dir.parent.parent) or ""
 
+    dry_run_active = env.dry_run_child and role in ("implementer", "tester")
+    dry_run_block = _dry_run_prompt_block(role, task_dir) if dry_run_active else ""
+
     # Render prompt
     prompt_path = env.mas / "prompts" / f"{role}.md"
     if not prompt_path.exists():
@@ -1348,12 +1389,14 @@ def _dispatch_role(
             worktree=str(cwd),
             mas_dir=str(env.mas),
             parent_summary=parent_summary,
+            dry_run_block=dry_run_block,
         )
 
     attempt = task.attempt
     log_path = task_dir / "logs" / f"{role}-{attempt}.log"
 
     stdin_text = prompt if not adapter.agentic else None
+    extra_env = {"MAS_DRY_RUN": "1"} if dry_run_active else None
     try:
         handle = adapter.dispatch(
             prompt=prompt,
@@ -1362,6 +1405,7 @@ def _dispatch_role(
             log_path=log_path,
             role=role,
             stdin_text=stdin_text,
+            extra_env=extra_env,
         )
     except AdapterUnavailableError as e:
         result = Result(

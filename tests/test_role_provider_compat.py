@@ -88,7 +88,7 @@ def test_agentic_adapter_gets_no_stdin_text(tmp_path: Path, role: str):
 
     captured: list[dict] = []
 
-    def fake_dispatch(self, prompt, task_dir, cwd, log_path, role, stdin_text=None):  # noqa: ARG001
+    def fake_dispatch(self, prompt, task_dir, cwd, log_path, role, stdin_text=None, **_):  # noqa: ARG001
         captured.append({"stdin_text": stdin_text, "prompt": prompt})
         return _fake_handle(role)
 
@@ -115,7 +115,7 @@ def test_nonagentic_adapter_gets_prompt_as_stdin_text(tmp_path: Path, role: str)
 
     captured: list[dict] = []
 
-    def fake_dispatch(self, prompt, task_dir, cwd, log_path, role, stdin_text=None):  # noqa: ARG001
+    def fake_dispatch(self, prompt, task_dir, cwd, log_path, role, stdin_text=None, **_):  # noqa: ARG001
         captured.append({"stdin_text": stdin_text, "prompt": prompt})
         return _fake_handle(role, provider="ollama")
 
