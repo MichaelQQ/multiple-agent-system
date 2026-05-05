@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from . import audit as audit_mod
+from . import graph as graph_mod
 
 
 def _parse_ts(ts: str) -> datetime | None:
@@ -18,8 +19,15 @@ def _parse_ts(ts: str) -> datetime | None:
 
 
 def _read_transitions(task_dir: Path) -> list[dict[str, str]]:
-    path = task_dir / "transitions.jsonl"
-    if not path.exists():
+    # `.transitions.log` is what tick writes in production; `transitions.jsonl`
+    # is preserved as a fallback for older fixtures and tests.
+    path = None
+    for name in (".transitions.log", "transitions.jsonl"):
+        candidate = task_dir / name
+        if candidate.exists():
+            path = candidate
+            break
+    if path is None:
         return []
     result = []
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -34,6 +42,36 @@ def _read_transitions(task_dir: Path) -> list[dict[str, str]]:
             "reason": parts[3] if len(parts) > 3 else "",
         })
     return result
+
+
+def _read_graph_dict(task_dir: Path) -> dict[str, Any]:
+    """Return graph.json as a serialisable dict, with each node/edge trimmed to
+    fields useful for trace consumers (omit large `handoff`/`artifacts` blobs).
+    """
+    g = graph_mod.read_graph(task_dir)
+    nodes = []
+    for n in g.nodes:
+        summary = (n.summary or "").splitlines()[0][:200] if n.summary else None
+        feedback = (n.feedback or "").splitlines()[0][:200] if n.feedback else None
+        nodes.append({
+            "subtask_id": n.subtask_id,
+            "role": n.role,
+            "cycle": n.cycle,
+            "status": n.status,
+            "verdict": n.verdict,
+            "summary": summary,
+            "feedback": feedback,
+        })
+    edges = [
+        {
+            "from_id": e.from_id,
+            "to_id": e.to_id,
+            "kind": e.kind,
+            "reason": (e.reason or "").splitlines()[0][:200] if e.reason else None,
+        }
+        for e in g.edges
+    ]
+    return {"nodes": nodes, "edges": edges}
 
 
 def _subtask_result_dir(task_dir: Path, subtask_id: str, cycle: int) -> Path:
@@ -159,4 +197,6 @@ def build_trace(task_dir: Path, *, now: datetime | None = None) -> dict[str, Any
         "total_duration_s": total_duration_s,
         "total_cost_usd": total_cost_usd,
         "stages": stages,
+        "graph": _read_graph_dict(task_dir),
+        "transitions": trans_list,
     }

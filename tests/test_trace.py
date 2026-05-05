@@ -125,9 +125,17 @@ def test_trace_happy_path_json(mas_dir):
     
     # (1) Assert JSON shape
     assert set(data.keys()) == {
-        "task_id", "goal", "started_at", "ended_at", 
-        "total_duration_s", "total_cost_usd", "stages"
+        "task_id", "goal", "started_at", "ended_at",
+        "total_duration_s", "total_cost_usd", "stages",
+        "graph", "transitions"
     }
+    assert isinstance(data["graph"], dict)
+    assert set(data["graph"].keys()) == {"nodes", "edges"}
+    assert isinstance(data["transitions"], list)
+    # transitions.jsonl had two lines for this task
+    assert len(data["transitions"]) == 2
+    assert data["transitions"][0]["from"] == "proposed"
+    assert data["transitions"][0]["to"] == "doing"
     assert data["task_id"] == task_id
     assert data["goal"] == "do something big"
     assert data["started_at"] == "2026-04-27T10:00:00+00:00"
@@ -266,6 +274,84 @@ def test_trace_rich_labels(mas_dir):
     assert result.exit_code == 0
     # "at least one role[cycle] label"
     assert "implementer[rev-0]" in result.output
+
+
+def test_trace_renders_graph_and_transitions_log(mas_dir):
+    """build_trace should expose graph.json and read the production
+    `.transitions.log` filename, not just the legacy `transitions.jsonl`."""
+    task_id = "20260505-graph-trace-7777"
+    task_dir = mas_dir / "tasks" / "done" / task_id
+    task_dir.mkdir(parents=True)
+
+    task = Task(id=task_id, role="orchestrator", goal="exercise graph + transitions")
+    (task_dir / "task.json").write_text(task.model_dump_json())
+
+    graph_payload = {
+        "nodes": [
+            {
+                "subtask_id": "impl-1", "role": "implementer", "cycle": 0,
+                "status": "success", "verdict": None,
+                "summary": "implemented X",
+                "feedback": None,
+                "artifacts": [], "handoff": None,
+            },
+            {
+                "subtask_id": "eval-1", "role": "evaluator", "cycle": 0,
+                "status": "success", "verdict": "needs_revision",
+                "summary": "missing test", "feedback": "add coverage for X",
+                "artifacts": [], "handoff": None,
+            },
+            {
+                "subtask_id": "rev-1-impl", "role": "implementer", "cycle": 1,
+                "status": "success", "verdict": None,
+                "summary": "fixed", "feedback": None,
+                "artifacts": [], "handoff": None,
+            },
+        ],
+        "edges": [
+            {"from_id": "impl-1", "to_id": "eval-1", "kind": "sequence", "reason": None},
+            {"from_id": "eval-1", "to_id": "rev-1-impl", "kind": "revision",
+             "reason": "add coverage for X"},
+        ],
+    }
+    (task_dir / "graph.json").write_text(json.dumps(graph_payload))
+
+    # Production filename — the trace must read it without a transitions.jsonl fallback
+    (task_dir / ".transitions.log").write_text(
+        "2026-05-05T09:00:00+00:00|proposed|doing|start\n"
+        "2026-05-05T09:30:00+00:00|doing|done|finished\n"
+    )
+    # No audit events — stages will be empty, but graph + transitions must still surface
+    (task_dir / "audit.jsonl").write_text("")
+
+    with patch("mas.cli.project_dir", return_value=mas_dir):
+        result_json = runner.invoke(app, ["trace", task_id, "--json"])
+    assert result_json.exit_code == 0
+    data = json.loads(result_json.output)
+
+    # graph payload preserved (nodes + edges projection)
+    assert len(data["graph"]["nodes"]) == 3
+    assert {n["subtask_id"] for n in data["graph"]["nodes"]} == {"impl-1", "eval-1", "rev-1-impl"}
+    revision_edges = [e for e in data["graph"]["edges"] if e["kind"] == "revision"]
+    assert len(revision_edges) == 1
+    assert revision_edges[0]["from_id"] == "eval-1"
+    assert revision_edges[0]["to_id"] == "rev-1-impl"
+    assert "add coverage" in revision_edges[0]["reason"]
+
+    # transitions read from .transitions.log
+    assert len(data["transitions"]) == 2
+    assert data["transitions"][-1]["to"] == "done"
+
+    # default Rich view surfaces graph + transitions even with no stages
+    with patch("mas.cli.project_dir", return_value=mas_dir):
+        result_rich = runner.invoke(app, ["trace", task_id])
+    assert result_rich.exit_code == 0
+    out = result_rich.output
+    assert "Graph nodes" in out
+    assert "Graph edges" in out
+    assert "Transitions" in out
+    assert "revision" in out
+    assert "rev-1-impl" in out
 
 
 def test_readme_trace_documents_json_object_shape():

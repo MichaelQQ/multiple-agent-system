@@ -1109,14 +1109,19 @@ def trace(
 
     trace_data = trace_mod.build_trace(task_dir)
     stages = trace_data["stages"]
+    graph_data = trace_data.get("graph") or {"nodes": [], "edges": []}
+    transitions_data = trace_data.get("transitions") or []
 
     if json_out:
         _CLI_KEYS = {"subtask_id", "role", "cycle", "started_at", "ended_at", "duration_s", "status", "cost_usd"}
-        cli_data = {**trace_data, "stages": [{k: v for k, v in s.items() if k in _CLI_KEYS} for s in stages]}
+        cli_data = {
+            **trace_data,
+            "stages": [{k: v for k, v in s.items() if k in _CLI_KEYS} for s in stages],
+        }
         typer.echo(json.dumps(cli_data))
         return
 
-    if not stages:
+    if not stages and not graph_data["nodes"] and not transitions_data:
         typer.echo("no stage data yet")
         return
 
@@ -1136,31 +1141,84 @@ def trace(
         "in_progress": "dim",
     }
 
-    table = Table(show_header=True, header_style="bold")
-    table.add_column("Stage", style="cyan")
-    table.add_column("Status")
-    table.add_column("Started")
-    table.add_column("Duration")
-    table.add_column("Cost")
-
     from rich.markup import escape as _escape
 
-    for s in stages:
-        label = f"{s['role']}[{s['cycle']}]"
-        status = s["status"]
-        color = _COLOR.get(status, "white")
-        started = (s.get("started_at") or "")[:19]
-        dur = f"{s['duration_s']:.1f}s" if s["duration_s"] is not None else "..."
-        cost = f"${s['cost_usd']:.4f}" if s["cost_usd"] is not None else "-"
-        table.add_row(
-            f"[{color}]{_escape(label)}[/{color}]",
-            f"[{color}]{status}[/{color}]",
-            started,
-            dur,
-            cost,
-        )
+    if stages:
+        table = Table(show_header=True, header_style="bold", title="Stages")
+        table.add_column("Stage", style="cyan")
+        table.add_column("Status")
+        table.add_column("Started")
+        table.add_column("Duration")
+        table.add_column("Cost")
 
-    console.print(table)
+        for s in stages:
+            label = f"{s['role']}[{s['cycle']}]"
+            status = s["status"]
+            color = _COLOR.get(status, "white")
+            started = (s.get("started_at") or "")[:19]
+            dur = f"{s['duration_s']:.1f}s" if s["duration_s"] is not None else "..."
+            cost = f"${s['cost_usd']:.4f}" if s["cost_usd"] is not None else "-"
+            table.add_row(
+                f"[{color}]{_escape(label)}[/{color}]",
+                f"[{color}]{status}[/{color}]",
+                started,
+                dur,
+                cost,
+            )
+
+        console.print(table)
+
+    if graph_data["nodes"]:
+        console.print()
+        gtable = Table(show_header=True, header_style="bold", title="Graph nodes")
+        gtable.add_column("Node", style="cyan")
+        gtable.add_column("Role")
+        gtable.add_column("Cycle")
+        gtable.add_column("Status")
+        gtable.add_column("Verdict")
+        for n in graph_data["nodes"]:
+            status = n.get("status") or "-"
+            color = _COLOR.get(status, "white")
+            gtable.add_row(
+                _escape(n.get("subtask_id") or ""),
+                n.get("role") or "",
+                str(n.get("cycle") if n.get("cycle") is not None else ""),
+                f"[{color}]{status}[/{color}]",
+                n.get("verdict") or "-",
+            )
+        console.print(gtable)
+
+    if graph_data["edges"]:
+        console.print()
+        etable = Table(show_header=True, header_style="bold", title="Graph edges")
+        etable.add_column("From", style="cyan")
+        etable.add_column("To", style="cyan")
+        etable.add_column("Kind")
+        etable.add_column("Reason")
+        for e in graph_data["edges"]:
+            etable.add_row(
+                _escape(e.get("from_id") or ""),
+                _escape(e.get("to_id") or ""),
+                e.get("kind") or "",
+                _escape((e.get("reason") or "")[:80]),
+            )
+        console.print(etable)
+
+    if transitions_data:
+        console.print()
+        ttable = Table(show_header=True, header_style="bold", title="Transitions")
+        ttable.add_column("Timestamp")
+        ttable.add_column("From")
+        ttable.add_column("To")
+        ttable.add_column("Reason")
+        for t in transitions_data:
+            ttable.add_row(
+                (t.get("timestamp") or "")[:19],
+                t.get("from") or "",
+                t.get("to") or "",
+                _escape(t.get("reason") or ""),
+            )
+        console.print(ttable)
 
 
 @app.command()
