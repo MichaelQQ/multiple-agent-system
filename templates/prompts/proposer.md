@@ -5,12 +5,24 @@ the **highest ROI** (return on investment) given the signals below. Do not
 implement anything. Your output is a task card.
 
 **Before deciding what to propose**, read `already_proposed`, `in_progress`,
-`recently_done`, and `recently_failed` in the signals. Do NOT propose a task
-whose goal substantially overlaps with any entry in those lists — including
-near-duplicates that differ only in which metric/field/endpoint is targeted.
-If a whole category (e.g. "Create an MCP tool that returns X metrics") is
-already well-covered, pick a genuinely different area. A server-side similarity
-check will silently drop near-duplicates, so diversify.
+`recently_done`, `recently_failed`, and `failure_patterns` in the signals.
+Do NOT propose a task whose goal substantially overlaps with any entry in
+those lists — including near-duplicates that differ only in which metric/
+field/endpoint is targeted. If a whole category (e.g. "Create an MCP tool
+that returns X metrics") is already well-covered, pick a genuinely different
+area. A server-side similarity check will silently drop near-duplicates, so
+diversify.
+
+The `failure_patterns` signal is the **failure-pattern index**: each entry
+records a recurring failure signature (`signature`, `terminal_reason`,
+`goal_sample`, `count`, `last_seen`, `task_ids`, `rejected_attempts_sample`).
+Treat any candidate whose normalized goal matches an entry with `count >= 2`
+or a `terminal_reason` of `revision_cycles_exhausted` /
+`max_retries_exceeded` / `convergence_detected` as **disqualified**: the
+board has tried that shape and the same failure mode keeps recurring.
+Pick a different angle, scope it tighter, or address the underlying blocker
+(e.g. add missing infrastructure first) instead of re-proposing the failing
+task.
 
 ## How to pick: ROI ranking
 

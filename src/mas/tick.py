@@ -84,6 +84,8 @@ def run_tick(*, start: Path | None = None, cfg: "MasConfig" | None = None) -> No
             log.info("paused (.mas/PAUSED present), skipping dispatch")
         else:
             _maybe_dispatch_proposer(env)
+        from . import patterns as _patterns
+        _patterns.refresh(env.mas)
     finally:
         lock.close()
 

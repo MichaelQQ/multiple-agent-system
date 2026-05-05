@@ -213,6 +213,9 @@ def gather_proposer_signals(
     else:
         signals["ci_output"] = ""
 
+    from . import patterns as _patterns
+    signals["failure_patterns"] = _patterns.read_patterns(_mas, limit=20)
+
     return ProposerSignals.model_validate(signals)
 
 

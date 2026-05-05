@@ -444,6 +444,10 @@ mas proposals rejected --limit 20 --json    # NDJSON output
 
 Exits 0 when the log is missing or empty. Malformed lines are skipped with a `WARNING` and do not crash the command.
 
+### Failure-pattern index
+
+At the end of every tick, mas regenerates `.mas/patterns.jsonl` from the contents of `tasks/failed/`. Each line is a JSON object describing a recurring failure signature: tasks with the same normalized goal-token set and the same terminal transition reason (`max_retries_exceeded`, `revision_cycles_exhausted`, `convergence_detected …`, `cost_budget_exceeded`, …) collapse to one record with `count`, `task_ids`, and a `rejected_attempts_sample` drawn from each task's `state.json`. The proposer reads this file via `gather_proposer_signals` (exposed as `signals.failure_patterns`) and is instructed to disqualify any candidate whose normalized goal matches an entry that has already failed twice or hit a recurrent failure mode — preventing the board from looping on the same shape. Best-effort: pattern-index errors never abort a tick.
+
 ## Upgrading templates
 
 ```sh
