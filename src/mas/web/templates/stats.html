@@ -60,6 +60,36 @@
 </div>
 
 <div class="card">
+  <h2>Per-Role Cost Breakdown</h2>
+  {% if cost_by_role %}
+  <table>
+    <thead>
+      <tr>
+        <th>Role</th>
+        <th>Count</th>
+        <th>Cost (USD)</th>
+        <th>Tokens In</th>
+        <th>Tokens Out</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for role, info in cost_by_role.items() %}
+      <tr>
+        <td><span class="pill pill-role">{{ role }}</span></td>
+        <td>{{ info.count }}</td>
+        <td>${{ "%.6f"|format(info.cost_usd) }}</td>
+        <td>{{ info.tokens_in }}</td>
+        <td>{{ info.tokens_out }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>No cost data by role.</p>
+  {% endif %}
+</div>
+
+<div class="card">
   <h2>Outcome Rates</h2>
   <table>
     <tbody>

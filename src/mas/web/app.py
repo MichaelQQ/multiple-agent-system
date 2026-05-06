@@ -22,6 +22,7 @@ from pydantic import TypeAdapter
 from .. import board, cron, current_subtask, daemon, transitions, worktree
 from ..audit import read_events
 from ..config import load_config, project_dir, project_root, validate_environment
+from ..cost_helpers import aggregate_costs_by_role, at_risk_tasks
 from ..events import read_board_events
 from ..schemas import RoleConfig
 from ..stats import compute_stats, parse_since
@@ -152,8 +153,10 @@ def _task_detail(mas: Path, task_id: str) -> dict[str, Any]:
                     "goal": spec.goal,
                     "status": _subtask_status(child_dir),
                     "summary": (r.summary if r else ""),
+                    "model": (r.model if r and hasattr(r, "model") else None),
                     "tokens_in": r.tokens_in if r else None,
                     "tokens_out": r.tokens_out if r else None,
+                    "duration_s": r.duration_s if r else None,
                     "cost_usd": r.cost_usd if r else None,
                 }
             )
@@ -201,12 +204,15 @@ def _task_detail(mas: Path, task_id: str) -> dict[str, Any]:
         elapsed = _get_elapsed_s(marker["start_time_iso"])
         current_subtask_info = {**marker, "elapsed_s": elapsed}
 
+    cost_by_role = aggregate_costs_by_role(tdir)
+
     return {
         "column": col,
         "task": task,
         "result": result,
         "subtasks": subtasks,
         "cost_totals": cost_totals,
+        "cost_by_role": cost_by_role,
         "budget": budget,
         "transitions": txns,
         "audit": audit,
@@ -288,6 +294,8 @@ def create_app(project: Path | None = None) -> FastAPI:
             flash = f"deleted task {deleted}"
         elif deleted_count is not None:
             flash = f"deleted {deleted_count} task(s)"
+        from ..cost_helpers import at_risk_tasks as _at_risk_tasks
+        at_risk = _at_risk_tasks(mas)
         return templates.TemplateResponse(
             request,
             "board.html",
@@ -298,6 +306,7 @@ def create_app(project: Path | None = None) -> FastAPI:
                 "daemon_running": running,
                 "project": str(proj),
                 "flash": flash,
+                "at_risk_tasks": at_risk,
             },
         )
 
@@ -500,16 +509,67 @@ def create_app(project: Path | None = None) -> FastAPI:
                 error = str(e)
                 since_param = None
         stats = compute_stats(mas, since=since_param)
+        # Compute per-role cost breakdown from all tasks
+        cost_by_role: dict[str, dict] = {}
+        for col in ("proposed", "doing", "done", "failed"):
+            col_dir = mas / "tasks" / col
+            if not col_dir.exists():
+                continue
+            for task_dir in col_dir.iterdir():
+                if not task_dir.is_dir():
+                    continue
+                rollup = aggregate_costs_by_role(task_dir)
+                for role, info in rollup.items():
+                    if role not in cost_by_role:
+                        cost_by_role[role] = {"count": 0, "cost_usd": 0.0, "tokens_in": 0, "tokens_out": 0}
+                    cost_by_role[role]["count"] += info["count"]
+                    cost_by_role[role]["cost_usd"] = float(cost_by_role[role]["cost_usd"]) + float(info["cost_usd"])
+                    cost_by_role[role]["tokens_in"] = int(cost_by_role[role]["tokens_in"]) + int(info["tokens_in"])
+                    cost_by_role[role]["tokens_out"] = int(cost_by_role[role]["tokens_out"]) + int(info["tokens_out"])
         return templates.TemplateResponse(
             request,
             "stats.html",
             {
                 "stats": stats,
+                "cost_by_role": cost_by_role,
                 "since": since or "",
                 "error": error,
                 "project": str(proj),
             },
         )
+
+    @app.get("/costs")
+    def costs_json():
+        from ..board import list_column
+        from ..cost_helpers import aggregate_costs_by_role
+
+        roles: dict[str, dict] = {}
+        total = {"cost_usd": 0.0, "tokens_in": 0, "tokens_out": 0}
+        for col in ("proposed", "doing", "done", "failed"):
+            col_dir = mas / "tasks" / col
+            if not col_dir.exists():
+                continue
+            for task_dir in col_dir.iterdir():
+                if not task_dir.is_dir():
+                    continue
+                rollup = aggregate_costs_by_role(task_dir)
+                for role, info in rollup.items():
+                    if role not in roles:
+                        roles[role] = {"count": 0, "cost_usd": 0.0, "tokens_in": 0, "tokens_out": 0}
+                    roles[role]["count"] += info["count"]
+                    roles[role]["cost_usd"] = float(roles[role]["cost_usd"]) + float(info["cost_usd"])
+                    roles[role]["tokens_in"] = int(roles[role]["tokens_in"]) + int(info["tokens_in"])
+                    roles[role]["tokens_out"] = int(roles[role]["tokens_out"]) + int(info["tokens_out"])
+        for role, info in roles.items():
+            total["cost_usd"] = float(total["cost_usd"]) + float(info["cost_usd"])
+            total["tokens_in"] = int(total["tokens_in"]) + int(info["tokens_in"])
+            total["tokens_out"] = int(total["tokens_out"]) + int(info["tokens_out"])
+        return {"roles": roles, "total": total}
+
+    @app.get("/costs/at-risk")
+    def costs_at_risk_json():
+        from ..cost_helpers import at_risk_tasks
+        return at_risk_tasks(mas)
 
     @app.get("/daemon/status")
     def daemon_status_endpoint():
