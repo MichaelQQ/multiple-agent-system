@@ -22,6 +22,8 @@ $previous_failure
 
 $dry_run_block
 
+$pattern_block
+
 ## What "success" means here
 
 Tests must **run** and fail for the **right reason** — an assertion about the

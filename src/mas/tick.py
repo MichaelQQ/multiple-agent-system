@@ -1407,6 +1407,43 @@ def _dry_run_prompt_block(role: str, task_dir: Path) -> str:
     )
 
 
+def _failure_pattern_block(mas_dir: Path, goal: str, top_n: int = 5) -> str:
+    """Render a markdown block of recurring failure patterns relevant to *goal*.
+
+    Reads ``mas_dir/patterns.jsonl``, filters patterns whose ``goal_sample``
+    is semantically similar to *goal*, and formats the top-N into a prompt
+    addendum injected via ``$pattern_block`` for implementer/tester roles.
+    """
+    patterns = read_patterns(mas_dir)
+    if not patterns:
+        return ""
+
+    # Filter by relevance using goal_similarity with a reasonable threshold.
+    threshold = 0.15
+    relevant = [
+        p for p in patterns
+        if goal_similarity(goal, p.get("goal_sample", "")) >= threshold
+    ]
+
+    if not relevant:
+        return ""
+
+    # Sort by count descending, take top N.
+    relevant.sort(key=lambda p: p.get("count", 0), reverse=True)
+    top = relevant[:top_n]
+
+    # Format as markdown block.
+    lines = ["## Recurring failure patterns", ""]
+    for p in top:
+        lines.append(f"### {p.get('signature', '')}")
+        lines.append(f"- Count: {p.get('count', 0)}")
+        lines.append(f"- Terminal reason: {p.get('terminal_reason', '')}")
+        lines.append(f"- Goal sample: {p.get('goal_sample', '')}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 def _dispatch_role(
     env: TickEnv,
     task: Task,
@@ -1447,6 +1484,10 @@ def _dispatch_role(
     if role == "orchestrator" and _consensus_enabled(env.cfg, task):
         consensus_block = _consensus_prompt_block(task_dir)
 
+    pattern_block = ""
+    if role in ("implementer", "tester"):
+        pattern_block = _failure_pattern_block(env.mas, task.goal)
+
     # Render prompt
     prompt_path = env.mas / "prompts" / f"{role}.md"
     if not prompt_path.exists():
@@ -1462,6 +1503,7 @@ def _dispatch_role(
             parent_summary=parent_summary,
             dry_run_block=dry_run_block,
             consensus_block=consensus_block,
+            pattern_block=pattern_block,
         )
 
     attempt = task.attempt
