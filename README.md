@@ -358,6 +358,23 @@ When the running total of `cost_usd` across completed subtasks reaches the effec
 
 `mas cost <task-id>` shows a `Budget:` line (e.g., `Budget: 0.012300 / 0.050000 (24.6% utilized)`) when `cost_budget_usd` is set on the task.
 
+### Cost dashboard (Web UI)
+
+The web UI provides a cost dashboard with per-role breakdown and at-risk alerts:
+
+- **Board view (`/`)**: Shows an "At Risk" alert section flagging tasks that have exceeded 80% of their budget (graceful when budget is unset).
+- **Task detail view (`/task/<id>`)**: Displays a "Cost by Role" section breaking down costs by role (proposer/orchestrator/implementer/tester/evaluator), plus a per-subtask table with model, tokens in/out, duration, and cost.
+- **Stats page (`/stats`)**: Shows a global cost summary with per-role aggregation alongside existing token/cost totals.
+
+Programmatic access is available via JSON endpoints:
+
+```sh
+curl http://localhost:8080/costs              # per-role cost breakdown + global totals
+curl http://localhost:8080/costs/at-risk      # task IDs flagged as >80% of budget
+```
+
+Both endpoints return JSON with graceful fallbacks (empty results or zero values) when budget is unset or pricing data is unavailable.
+
 ## Stats
 
 ```sh
@@ -573,7 +590,7 @@ and log tails. Tasks within each column are sorted by most recent transition
 |-------------|------------------------|-------------------------------------------------------------------|
 | Board       | `/`                   | Kanban view; run tick, start/stop daemon, prune, upgrade          |
 | Events      | `/events`             | Cross-task audit feed with `task/role/status/event/limit` filters |
-| Stats       | `/stats`              | Aggregate board counts, token usage, and cost totals; accepts `?since=<window>` (e.g. `1h`, `7d`) to filter by recency |
+| Stats       | `/stats`              | Aggregate board counts, token usage, and cost totals with per-role breakdown; accepts `?since=<window>` (e.g. `1h`, `7d`) to filter by recency |
 | Validate    | `/validate`           | Runs `validate_environment` and shows providers/roles summary     |
 | Cron        | `/cron`               | Inspect, install, and uninstall the per-project cron entry        |
 | Config      | `/config/roles`       | Edit `.mas/roles.yaml` in-browser with YAML + pydantic validation |

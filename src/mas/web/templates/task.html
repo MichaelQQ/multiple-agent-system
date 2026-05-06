@@ -76,7 +76,7 @@
 <h2>Subtasks <span class="pill">{{ subtasks|length }}</span></h2>
 <table>
   <tr>
-    <th>id</th><th>role</th><th>status</th><th>goal</th><th>summary</th><th>tokens</th><th>cost</th>
+    <th>id</th><th>role</th><th>status</th><th>goal</th><th>summary</th><th>Model</th><th>Tokens In</th><th>Tokens Out</th><th>Duration</th><th>Cost</th>
   </tr>
   {% for s in subtasks %}
     <tr>
@@ -85,11 +85,32 @@
       <td><span class="status-{{ s.status }}">{{ s.status }}</span></td>
       <td><details><summary>{{ s.goal[:80] }}{% if s.goal|length > 80 %}…{% endif %}</summary><div class="markdown-body">{{ s.goal | md }}</div></details></td>
       <td>{% if s.summary %}<details><summary>{{ s.summary[:120] }}{% if s.summary|length > 120 %}…{% endif %}</summary><div class="markdown-body">{{ s.summary | md }}</div></details>{% endif %}</td>
-      <td class="mono">{% if s.tokens_in is not none %}{{ s.tokens_in }}/{{ s.tokens_out }}{% else %}—{% endif %}</td>
+      <td class="mono">{{ s.model if s.model is defined else "—" }}</td>
+      <td class="mono">{% if s.tokens_in is not none %}{{ s.tokens_in }}{% else %}—{% endif %}</td>
+      <td class="mono">{% if s.tokens_out is not none %}{{ s.tokens_out }}{% else %}—{% endif %}</td>
+      <td class="mono">{% if s.duration_s is not none %}{{ "%.1f"|format(s.duration_s) }}s{% else %}—{% endif %}</td>
       <td class="mono">{% if s.cost_usd is not none %}${{ "%.6f"|format(s.cost_usd) }}{% else %}—{% endif %}</td>
     </tr>
   {% endfor %}
-  {% if cost_totals %}
+  {% if cost_by_role %}
+<h3>Cost by Role</h3>
+<table>
+  <tr>
+    <th>Role</th><th>Count</th><th>Tokens In</th><th>Tokens Out</th><th>Cost</th>
+  </tr>
+  {% for role, info in cost_by_role.items() %}
+  <tr>
+    <td><span class="pill pill-role">{{ role }}</span></td>
+    <td>{{ info.count }}</td>
+    <td class="mono">{{ info.tokens_in }}</td>
+    <td class="mono">{{ info.tokens_out }}</td>
+    <td class="mono">${{ "%.6f"|format(info.cost_usd) }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+{% if cost_totals %}
     <tr style="background: var(--surface-alt); font-weight: 600;">
       <td colspan="5" style="text-align:right">TOTAL</td>
       <td class="mono">{{ cost_totals.tokens_in }}/{{ cost_totals.tokens_out }}</td>

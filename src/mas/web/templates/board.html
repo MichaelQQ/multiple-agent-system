@@ -17,6 +17,18 @@
 {% block content %}
 {% if flash %}<div class="flash">{{ flash }}</div>{% endif %}
 
+{% set at_risk = at_risk_tasks if at_risk_tasks is defined else [] %}
+{% if at_risk %}
+<div class="card" style="border-left: 4px solid #ef4444; background: #fef2f2;">
+  <h3 style="margin-top:0; color: #dc2626;">⚠️ At Risk Tasks (>&gt;80% budget)</h3>
+  <ul style="margin: 8px 0 0 0; padding-left: 20px;">
+    {% for task_id in at_risk %}
+    <li><a href="/task/{{ task_id }}" style="color: #dc2626;">{{ task_id }}</a></li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
 <div class="card">
   <h3 style="margin-top:0">Actions</h3>
   <div class="actions">

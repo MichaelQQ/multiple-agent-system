@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Cost dashboard features**:
+  - Per-role cost breakdown (proposer/orchestrator/implementer/tester/evaluator) on task detail view (`/task/<id>`)
+  - Global cost summary with per-role aggregation on stats page (`/stats`)
+  - At-risk alert section on board view (`/`) flagging tasks exceeding 80% of their budget
+  - Per-subtask detail table showing model, tokens_in, tokens_out, duration_s, and cost_usd on task detail view
+  - `GET /costs` JSON endpoint for programmatic access to per-role cost breakdown and global totals
+  - `GET /costs/at-risk` JSON endpoint returning task IDs flagged as exceeding the 80% budget threshold
+  - Graceful fallback when budget is unset or pricing is unavailable (no crash, empty/zero values)
+  - New `src/mas/cost_helpers.py` module with `aggregate_costs_by_role()` and `at_risk_tasks()` helpers
+
 - **Failure-pattern index** (`.mas/patterns.jsonl`): every tick now ends by regenerating a JSONL aggregate of recurring failure signatures from `tasks/failed/`. Each record carries `signature`, `terminal_reason` (last `to_state == failed` transition reason), `goal_sample`, `count`, `last_seen`, `task_ids`, and a `rejected_attempts_sample` projected from each parent's `state.json`. Two failures sharing the same normalized goal-token set and terminal reason collapse into one record. `gather_proposer_signals()` now reads this file and exposes the top 20 entries on `ProposerSignals.failure_patterns`; the proposer prompt is updated to disqualify any candidate whose goal matches an entry with `count >= 2` or a `revision_cycles_exhausted` / `max_retries_exceeded` / `convergence_detected` reason — preventing the board from re-proposing tasks that have already failed for the same reason. New `src/mas/patterns.py` module exposes `compute_patterns()`, `read_patterns()`, `write_patterns()`, and `refresh()` (best-effort: errors are logged at WARNING and never abort a tick). Closes gap 7 / TODO #18 in `docs/reliability-gaps.md`.
 
 - **`mas trace` now renders graph + transitions**: the per-task trace command and `build_trace()` payload now include the task graph (`graph.json`: nodes with `subtask_id`/`role`/`cycle`/`status`/`verdict`/`summary`/`feedback`; edges with `from_id`/`to_id`/`kind` ∈ {`sequence`,`revision`,`arbiter`,`replan`}/`reason`) and the lifecycle transitions log (newly read from the production `.transitions.log` filename, with the legacy `transitions.jsonl` retained as a fallback). The default Rich view adds **Graph nodes**, **Graph edges**, and **Transitions** tables after the stages timeline; `--json` exposes top-level `graph` and `transitions` keys alongside the existing `task_id`/`goal`/`stages`/cost rollup. Closes gap 7 from `docs/reliability-gaps.md`.
