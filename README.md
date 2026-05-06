@@ -619,6 +619,13 @@ tabbed log viewer. **Task detail views display the currently executing subtask**
 previous-failure text are rendered as Markdown (headings, lists, fenced
 code, tables).
 
+The **Failure history** section on the task detail page (`/task/<id>`)
+displays patterns from `patterns.jsonl` that match the task's goal,
+including `goal_sample`, `terminal_reason`, `count`, `last_seen`, related
+task links, and rejected attempt snippets. Filter with `?failure_filter=blocking`
+to show only patterns with terminal reasons (`revision_cycles_exhausted`,
+`max_retries_exceeded`, `convergence_detected`).
+
 
 It is designed for local loopback use and has no auth layer.
 

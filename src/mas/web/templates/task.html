@@ -129,6 +129,48 @@
 </table>
 {% endif %}
 
+{% if failure_patterns is defined %}
+<details class="card" open>
+  <summary><strong>Failure history</strong>
+    {% if failure_filter == 'blocking' %}
+      <a href="/task/{{ task_id }}" style="margin-left:12px;font-size:0.85em">clear filter</a>
+    {% else %}
+      <a href="/task/{{ task_id }}?failure_filter=blocking" style="margin-left:12px;font-size:0.85em">filter blocking</a>
+    {% endif %}
+  </summary>
+  {% if failure_patterns %}
+  <table style="margin-top:10px">
+    <tr>
+      <th>Goal Sample</th>
+      <th>Terminal Reason</th>
+      <th>Count</th>
+      <th>Last Seen</th>
+      <th>Related Tasks</th>
+      <th>Rejected Attempts</th>
+    </tr>
+    {% for p in failure_patterns %}
+    <tr>
+      <td>{{ p.goal_sample }}</td>
+      <td>{{ p.terminal_reason }}</td>
+      <td>{{ p.count }}</td>
+      <td class="mono">{{ p.last_seen[:19] if p.last_seen else '' }}</td>
+      <td>{% for tid in p.task_ids %}<a href="/task/{{ tid }}">{{ tid }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</td>
+      <td>{% if p.rejected_attempts_sample %}
+        <details><summary>{{ p.rejected_attempts_sample|length }} attempt(s)</summary>
+        <ul style="margin:4px 0 0 16px">
+          {% for a in p.rejected_attempts_sample %}<li>{{ a }}</li>{% endfor %}
+        </ul>
+        </details>
+      {% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p style="margin-top:10px;color:var(--text-muted)">No failure patterns yet</p>
+  {% endif %}
+</details>
+{% endif %}
+
 {% if logs %}
 <h2>Logs</h2>
 <div class="log-tabs">
