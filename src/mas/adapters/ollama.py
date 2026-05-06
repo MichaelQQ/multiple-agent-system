@@ -53,6 +53,7 @@ class OllamaAdapter(Adapter):
         log_path: Path,
         role: str,
         stdin_text: str | None = None,
+        extra_env: dict[str, str] | None = None,
     ) -> DispatchHandle:
         if not self.health_check():
             message = self._last_health_error or f"{self.provider_cfg.cli} is unavailable"
@@ -98,6 +99,8 @@ class OllamaAdapter(Adapter):
         env = self._env()
         env["MAS_ROLE"] = role
         env["MAS_TASK_DIR"] = str(task_dir)
+        if extra_env:
+            env.update(extra_env)
 
         proc = subprocess.Popen(
             [sys.executable, str(wrapper_path)],
