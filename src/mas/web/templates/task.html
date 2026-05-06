@@ -7,6 +7,7 @@
     <span class="task-id">{{ task_id }}</span>
     <span class="pill pill-{{ column }}">{{ column }}</span>
     <span class="pill pill-role">{{ task.role }}</span>
+    {% if task.stuck %}<span class="pill pill-stuck">stuck</span>{% endif %}
     {% if task.cycle %}<span class="pill">cycle {{ task.cycle }}</span>{% endif %}
     {% if task.attempt and task.attempt > 1 %}<span class="pill">attempt {{ task.attempt }}</span>{% endif %}
   </div>

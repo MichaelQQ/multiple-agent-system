@@ -190,6 +190,27 @@ Each delivery is a JSON POST with these fields:
 
 Delivery is best-effort and non-blocking. Non-2xx responses, timeouts, and connection errors are caught and logged at `WARNING` level; they never block the tick loop.
 
+### Stuck-task detection
+
+The tick loop detects tasks that appear stuck and marks them accordingly:
+
+- **`stuck_detection` config** (in `.mas/config.yaml`, optional — defaults used when omitted):
+
+```yaml
+stuck_detection:
+  current_subtask_timeout_hours: 8    # mark stuck if .current_subtask marker exceeds this age
+  task_idle_timeout_hours: 24          # mark stuck if task idle (no subtask results) exceeds this age
+```
+
+- **Detection logic** (runs at the start of `_advance_one()` each tick):
+  1. If a `.current_subtask` marker file exists, parse its `start_time_iso` and compare elapsed hours against `current_subtask_timeout_hours`.
+  2. If no marker, check whether any subtask directory has a `result.json`; if so, the task is making progress.
+  3. If no subtask results, parse the first entry of `.transitions.log` and compare idle hours against `task_idle_timeout_hours`.
+
+- **Effect**: when stuck is detected, the tick loop logs a `WARNING` (`"task stuck: <reason>"`) and sets `Task.stuck = True` on the task JSON. The task remains in `doing/` for manual investigation.
+
+- **Schema**: `Task.stuck` (bool, default `False`) in `src/mas/schemas.py`. `StuckDetectionConfig` validates that both timeout values are non-negative.
+
 #### `mas webhooks test`
 
 Send a synthetic test payload to your configured webhooks without waiting for a real board transition:
@@ -617,7 +638,7 @@ button for bulk deletion. The task detail page shows a collapsible
 **Task info** section (id, role, column, parent, created, cycle/attempt,
 budget, inputs, constraints, previous failure), plus plan/subtasks, audit
 timeline, transitions, cost totals with the per-task budget row, and a
-tabbed log viewer. **Task detail views display the currently executing subtask**, showing role, provider, PID, and elapsed time. Task goals, result summaries/feedback, and
+tabbed log viewer. **Task detail views display the currently executing subtask**, showing role, provider, PID, and elapsed time. **Stuck tasks** display a yellow "stuck" pill on both the board card and the task detail header (set by the tick loop's stuck-task detection). Task goals, result summaries/feedback, and
 previous-failure text are rendered as Markdown (headings, lists, fenced
 code, tables).
 
@@ -635,6 +656,7 @@ It is designed for local loopback use and has no auth layer.
     proposed/{id}/task.json
     doing/{id}/
       task.json  plan.json  worktree/  pids/{role}.{provider}.pid
+      .current_subtask            # marker: active subtask id + start_time_iso
       audit.jsonl
       logs/{role}-{n}.log
       subtasks/{child}/{task.json, result.json, logs/, pids/}
@@ -653,6 +675,7 @@ The `board.read_task()` and `board.read_plan()` helpers parse with
 `model_validate_json()` to enforce this.
 
 - `Task.id` validates against pattern `{yyyymmdd}-{slug}-{hash4}`
+- `Task.stuck` (bool, default `False`) — set to `True` when stuck-task detection triggers
 - `Result.duration_s` must be non-negative
 - `ProposalHandoff` model for proposer handoffs
 

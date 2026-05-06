@@ -94,6 +94,7 @@ def _board_rows(mas: Path) -> dict[str, list[dict[str, Any]]]:
                     "last_move": last_move,
                     "sort_key": sort_key,
                     "progress": progress,
+                    "stuck": t.stuck,
                 }
             )
         rows[col].sort(key=lambda r: r["sort_key"], reverse=True)

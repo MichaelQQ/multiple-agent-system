@@ -162,6 +162,7 @@ Each dispatch: render role prompt → write task-dir `task.json` → `Popen([cli
 - **Audit logging** — every dispatch, completion, and state transition is appended to `{task_dir}/audit.jsonl` (timestamp, event, role, provider, task_id, subtask_id, status, duration_s, summary, details).
 - **Cost tracking** — adapters populate `tokens_in`, `tokens_out`, `cost_usd` on `result.json` where reported; `tick._finalize_parent` aggregates child totals into the parent `result.json`. Rate table in `src/mas/pricing.py`.
 - **Strict schema validation** — all pydantic models use `extra="forbid"`; `Task.id` is regex-validated; `Result.duration_s` must be ≥ 0; custom errors (`PlanParseError`, `TaskReadError`, `ResultReadError`) carry file path + content snippet + root cause.
+- **Stuck-task detection** — the tick loop detects tasks that appear stuck: (a) `.current_subtask` marker age exceeds `stuck_detection.current_subtask_timeout_hours` (default 8h); (b) no subtask results and idle time (from `.transitions.log`) exceeds `stuck_detection.task_idle_timeout_hours` (default 24h). Detected tasks get `Task.stuck = True` and a `WARNING` log entry. Configured via `stuck_detection:` in `.mas/config.yaml`.
 
 ## Out of scope for v1 (remaining)
 

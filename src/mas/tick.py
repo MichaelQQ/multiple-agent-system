@@ -20,13 +20,70 @@ from .logging import get_task_logger
 from .proposals import RejectedProposal, write_rejected_proposal
 from .patterns import read_patterns
 from .roles import _list_goals, _list_goals_with_meta, find_similar_goal, gather_proposer_signals, goal_similarity, parse_plan, render_prompt
-from .schemas import BaseModel, ConfigDict, MasConfig, Plan, ProposalHandoff, Result, Role, Task
+from .schemas import BaseModel, ConfigDict, MasConfig, Plan, ProposalHandoff, Result, Role, StuckDetectionConfig, Task
 
 log = logging.getLogger("mas.tick")
 
 
 class LockBusy(RuntimeError):
     pass
+
+
+def _is_task_stuck(task_dir: Path, config: StuckDetectionConfig) -> tuple[bool, str]:
+    """Check if a task is stuck based on subtask marker age or idle time.
+
+    Returns (True, reason) if stuck, (False, '') otherwise.
+    """
+    # Check current_subtask marker
+    marker_path = task_dir / ".current_subtask"
+    if marker_path.exists():
+        try:
+            marker = json.loads(marker_path.read_text())
+            start_time_iso = marker.get("start_time_iso")
+            if start_time_iso:
+                elapsed_s = current_subtask._get_elapsed_s(start_time_iso)
+                elapsed_h = elapsed_s / 3600
+                threshold = config.current_subtask_timeout_hours
+                if elapsed_h > threshold:
+                    subtask_id = marker.get("subtask_id", "unknown")
+                    return (True, f'current subtask {subtask_id} running for {elapsed_h:.1f}h (threshold: {threshold}h)')
+                else:
+                    # Marker exists and is not expired — task is actively working
+                    return (False, '')
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # No current subtask marker — check if any subtask has a result
+    subtasks_dir = task_dir / "subtasks"
+    if subtasks_dir.exists():
+        for child_dir in subtasks_dir.iterdir():
+            if (child_dir / "result.json").exists():
+                return (False, '')
+
+    # No subtask result — check idle time via transitions.log
+    transitions_log = task_dir / ".transitions.log"
+    if transitions_log.exists():
+        try:
+            lines = transitions_log.read_text().splitlines()
+            if lines:
+                first_line = lines[0]
+                parts = first_line.split("|", 3)
+                if len(parts) >= 1:
+                    timestamp_str = parts[0]
+                    try:
+                        ts = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+                        now = datetime.now(timezone.utc)
+                        elapsed_s = (now - ts).total_seconds()
+                        elapsed_h = elapsed_s / 3600
+                        threshold = config.task_idle_timeout_hours
+                        if elapsed_h > threshold:
+                            return (True, f'task idle for {elapsed_h:.1f}h (threshold: {threshold}h)')
+                    except ValueError:
+                        pass
+        except OSError:
+            pass
+
+    return (False, '')
 
 
 class TickEnv(BaseModel):
@@ -217,6 +274,15 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
         if not log_path.exists() and not env.paused:
             _dispatch_role(env, parent_task, parent_dir, parent_dir, role="proposer")
         return
+
+    # Stuck-task detection: check before proceeding with normal advancement.
+    stuck, reason = _is_task_stuck(parent_dir, env.cfg.stuck_detection)
+    if stuck:
+        get_task_logger(log, task_id=parent_task.id, component="tick").warning(
+            "task stuck: %s", reason
+        )
+        parent_task.stuck = True
+        board.write_task(parent_dir, parent_task)
 
     plan_path = parent_dir / "plan.json"
     wt = parent_dir / "worktree"

@@ -41,6 +41,7 @@ class Task(BaseModel):
     attempt: int = 1
     created_at: datetime = Field(default_factory=_now)
     cost_budget_usd: float | None = None
+    stuck: bool = False
 
     @field_validator("id")
     @classmethod
@@ -226,6 +227,20 @@ class DaemonConfig(BaseModel):
     log_backup_count: int = 5
 
 
+class StuckDetectionConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    current_subtask_timeout_hours: float = 8
+    task_idle_timeout_hours: float = 24
+
+    @field_validator("current_subtask_timeout_hours", "task_idle_timeout_hours")
+    @classmethod
+    def _non_negative_timeout(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("timeout must be non-negative")
+        return v
+
+
 class MasConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -239,6 +254,7 @@ class MasConfig(BaseModel):
     max_replans: int = 1
     webhooks: list[WebhookConfig] = Field(default_factory=list)
     daemon: DaemonConfig = Field(default_factory=DaemonConfig)
+    stuck_detection: StuckDetectionConfig = Field(default_factory=StuckDetectionConfig)
 
     @field_validator("proposer_signals", mode="before")
     @classmethod
