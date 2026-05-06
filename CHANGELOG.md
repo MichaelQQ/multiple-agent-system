@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`GET /health` endpoint** — returns daemon liveness status for monitoring systems (Kubernetes, systemd, cron). Writes `.mas/tick_heartbeat` (ISO-8601 UTC) at the end of each successful tick; the endpoint returns `200` with `{"status": "ok"}` when the heartbeat is fresh (within `2 × daemon.interval`, default 600 s), or `503` with `{"status": "degraded", "reason": "tick stalled"}` when the file is missing, corrupt, or stale. Includes Kubernetes liveness probe snippet and curl-based monitoring examples in the README.
 - **Cost dashboard features**:
   - Per-role cost breakdown (proposer/orchestrator/implementer/tester/evaluator) on task detail view (`/task/<id>`)
   - Global cost summary with per-role aggregation on stats page (`/stats`)

@@ -39,6 +39,12 @@ class TickEnv(BaseModel):
     dry_run_child: bool = False
 
 
+def _write_heartbeat(mas: Path) -> None:
+    """Write current UTC time as ISO8601 to .mas/tick_heartbeat."""
+    p = mas / "tick_heartbeat"
+    p.write_text(datetime.now(timezone.utc).isoformat())
+
+
 def _acquire_lock(mas_dir: Path):
     mas_dir.mkdir(parents=True, exist_ok=True)
     lock_path = mas_dir / "tick.lock"
@@ -95,6 +101,8 @@ def run_tick(
         _patterns.refresh(env.mas)
     finally:
         lock.close()
+    # Write heartbeat after lock release — keep tick fast.
+    _write_heartbeat(env.mas)
 
 
 _GRACE_AFTER_SIGTERM_S = 5.0
