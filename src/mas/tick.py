@@ -18,7 +18,8 @@ from .config import load_config, project_root, project_dir, validate_config, Con
 from .ids import task_id as new_task_id
 from .logging import get_task_logger
 from .proposals import RejectedProposal, write_rejected_proposal
-from .roles import _list_goals, _list_goals_with_meta, find_similar_goal, gather_proposer_signals, parse_plan, render_prompt
+from .patterns import read_patterns
+from .roles import _list_goals, _list_goals_with_meta, find_similar_goal, gather_proposer_signals, goal_similarity, parse_plan, render_prompt
 from .schemas import BaseModel, ConfigDict, MasConfig, Plan, ProposalHandoff, Result, Role, Task
 
 log = logging.getLogger("mas.tick")
@@ -1123,6 +1124,20 @@ def _finalize_parent(env: TickEnv, parent_dir: Path, parent_task) -> None:
 
 # --- 3. Proposer ------------------------------------------------------------
 
+def _blocked_by_failure_pattern(env: TickEnv, goal: str) -> dict | None:
+    """Return the first failure pattern that should block this goal, or None."""
+    patterns = read_patterns(env.mas)
+    if not patterns:
+        return None
+    threshold = env.cfg.proposal_similarity_threshold
+    terminal_reasons = {'revision_cycles_exhausted', 'max_retries_exceeded', 'convergence_detected'}
+    for pattern in patterns:
+        sim = goal_similarity(goal, pattern.get('goal_sample', ''))
+        if sim >= threshold:
+            if pattern.get('count', 0) >= 2 or pattern.get('terminal_reason') in terminal_reasons:
+                return pattern
+    return None
+
 
 def _materialize_proposal(env: TickEnv, result: Result) -> None:
     """Turn a successful proposer result.handoff into a proposed/ task card.
@@ -1147,6 +1162,17 @@ def _materialize_proposal(env: TickEnv, result: Result) -> None:
         tlog.warning("no goal in handoff, skipping materialization")
         return
     if len(board.list_column(env.mas, "proposed")) >= env.cfg.max_proposed:
+        return
+
+    blocking = _blocked_by_failure_pattern(env, goal)
+    if blocking is not None:
+        tlog.info(
+            "skipping proposal blocked by failure pattern (signature=%s, reason=%s, count=%d): %r",
+            blocking.get("signature", ""),
+            blocking.get("terminal_reason", ""),
+            blocking.get("count", 0),
+            goal,
+        )
         return
 
     goals_with_meta = (
