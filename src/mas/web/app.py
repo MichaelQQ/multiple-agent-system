@@ -15,7 +15,7 @@ from typing import Any
 
 import yaml
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import TypeAdapter
 
@@ -571,6 +571,35 @@ def create_app(project: Path | None = None) -> FastAPI:
     def costs_at_risk_json():
         from ..cost_helpers import at_risk_tasks
         return at_risk_tasks(mas)
+
+    @app.get("/health")
+    def health():
+        from datetime import datetime, timezone as _tz
+        heartbeat_path = mas / "tick_heartbeat"
+        now = datetime.now(_tz.utc)
+        now_iso = now.isoformat()
+        if not heartbeat_path.exists():
+            return JSONResponse(
+                status_code=503,
+                content={"status": "degraded", "timestamp": now_iso, "reason": "tick stalled"},
+            )
+        try:
+            ts_str = heartbeat_path.read_text().strip()
+            ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        except (ValueError, OSError):
+            return JSONResponse(
+                status_code=503,
+                content={"status": "degraded", "timestamp": now_iso, "reason": "tick stalled"},
+            )
+        interval = daemon.read_interval(mas)
+        threshold = 2 * interval
+        elapsed = (now - ts).total_seconds()
+        if elapsed > threshold:
+            return JSONResponse(
+                status_code=503,
+                content={"status": "degraded", "timestamp": now_iso, "reason": "tick stalled"},
+            )
+        return {"status": "ok", "timestamp": now_iso}
 
     @app.get("/daemon/status")
     def daemon_status_endpoint():

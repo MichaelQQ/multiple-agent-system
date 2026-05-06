@@ -645,6 +645,47 @@ code, tables).
 
 It is designed for local loopback use and has no auth layer.
 
+### Health endpoint
+
+`GET /health` returns the daemon liveness status for use with orchestration
+systems (Kubernetes, systemd, cron monitors).
+
+| Response | Body | When |
+|----------|------|------|
+| `200` | `{"status": "ok", "timestamp": "<ISO8601 UTC>"}` | Heartbeat file exists and is within the staleness threshold |
+| `503` | `{"status": "degraded", "timestamp": "<ISO8601 UTC>", "reason": "tick stalled"}` | Heartbeat file missing, unreadable, or older than the staleness threshold |
+
+**How it works:**
+
+1. Each tick writes `.mas/tick_heartbeat` (ISO-8601 UTC timestamp) on
+   successful completion.
+2. The endpoint reads `.mas/daemon.interval` (default `300` s) and uses
+   `2 × interval` as the staleness threshold.
+3. If the heartbeat file is missing, corrupt, or older than the threshold,
+   the endpoint returns `503 degraded`.
+
+**Integration examples:**
+
+```yaml
+# Kubernetes liveness probe
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 10
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+```
+
+```sh
+# curl-based monitoring check
+HEALTH=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health)
+if [ "$HEALTH" -ne 200 ]; then
+  echo "ALERT: mas daemon unhealthy (HTTP $HEALTH)"
+fi
+```
+
 ## Layout
 
 ```
