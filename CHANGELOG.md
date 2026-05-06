@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Stuck-task detection**: the tick loop now detects tasks that are stuck and marks them accordingly.
+  - New `StuckDetectionConfig` schema with `current_subtask_timeout_hours` (default 8) and `task_idle_timeout_hours` (default 24). Negative values are rejected by a Pydantic validator.
+  - New `MasConfig.stuck_detection` field (`StuckDetectionConfig`, defaults to factory instance).
+  - New `Task.stuck` boolean field (defaults to `False`); set to `True` when the tick loop detects the task is stuck.
+  - `_is_task_stuck()` in `tick.py`: checks (a) `.current_subtask` marker age against `current_subtask_timeout_hours`, (b) if no marker, checks whether any subtask has a `result.json`, (c) if no results, checks idle time from `.transitions.log` against `task_idle_timeout_hours`.
+  - `_advance_one()` integration: calls `_is_task_stuck()` before normal advancement; on detection, logs a `WARNING` (`"task stuck: <reason>"`) and sets `task.stuck = True`.
+  - Configure in `.mas/config.yaml` under `stuck_detection:` (optional; defaults used when omitted):
+    ```yaml
+    stuck_detection:
+      current_subtask_timeout_hours: 8    # fail subtask if marker exceeds this
+      task_idle_timeout_hours: 24          # fail task if idle (no subtask results) exceeds this
+    ```
+
 - **Cost dashboard features**:
   - Per-role cost breakdown (proposer/orchestrator/implementer/tester/evaluator) on task detail view (`/task/<id>`)
   - Global cost summary with per-role aggregation on stats page (`/stats`)

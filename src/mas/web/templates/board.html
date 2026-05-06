@@ -69,11 +69,12 @@
       </div>
       {% if rows[col] %}
         {% for r in rows[col] %}
-          <div class="task">
+          <div class="task {% if r.stuck %}task-stuck{% endif %}">
             <label style="display:flex; gap:8px; align-items:flex-start;">
               <input type="checkbox" name="task_ids" value="{{ r.id }}" class="bulk-check" onclick="updateBulk()">
               <span style="flex:1">
                 <a class="id" href="/task/{{ r.id }}">{{ r.id }}</a>
+                {% if r.stuck %}<span class="pill pill-stuck" title="Task is stuck (detected by tick loop)">stuck</span>{% endif %}
                 <div class="meta">
                   <span class="pill pill-role">{{ r.role }}</span>
                   {% if r.progress %}<span class="sep">·</span><span>{{ r.progress }}</span>{% endif %}
