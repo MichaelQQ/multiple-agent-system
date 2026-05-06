@@ -467,6 +467,8 @@ At the end of every tick, mas regenerates `.mas/patterns.jsonl` from the content
 
 During proposal materialization, `_materialize_proposal` in `tick.py` calls `_blocked_by_failure_pattern()` to check each candidate against `patterns.jsonl`. Proposals matching a pattern with `count >= 2` or a terminal reason (`revision_cycles_exhausted`, `max_retries_exceeded`, `convergence_detected`) are skipped using `goal_similarity` from `src/mas/roles.py` — preventing the board from looping on the same shape. Best-effort: pattern-index errors never abort a tick.
 
+Implementer and tester prompts now receive a `$pattern_block` template variable containing a markdown block of up to 5 recurring failure patterns (filtered by goal similarity with threshold 0.15 via `goal_similarity` from `src/mas/roles.py`, sorted by count descending). The block includes a header `Recurring failure patterns` and per-pattern details (`signature`, `count`, `terminal_reason`, `goal_sample`). This enables proactive solution design by surfacing prior failure modes. Orchestrator prompts omit this variable. When no relevant patterns exist, `$pattern_block` resolves to an empty string.
+
 ## Upgrading templates
 
 ```sh
