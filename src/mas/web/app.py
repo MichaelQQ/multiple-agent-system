@@ -24,6 +24,8 @@ from ..audit import read_events
 from ..config import load_config, project_dir, project_root, validate_environment
 from ..cost_helpers import aggregate_costs_by_role, at_risk_tasks
 from ..events import read_board_events
+from ..patterns import read_patterns
+from ..roles import goal_similarity
 from ..schemas import RoleConfig
 from ..stats import compute_stats, parse_since
 from ..trace import build_trace
@@ -117,7 +119,7 @@ def _progress_counts(parent_dir: Path) -> str:
     return ", ".join(f"{v} {k}" for k, v in counts.items()) or "empty"
 
 
-def _task_detail(mas: Path, task_id: str) -> dict[str, Any]:
+def _task_detail(mas: Path, task_id: str, failure_filter: str | None = None) -> dict[str, Any]:
     located = board.find_task(mas, task_id)
     if located is None:
         raise HTTPException(404, f"task not found: {task_id}")
@@ -207,6 +209,26 @@ def _task_detail(mas: Path, task_id: str) -> dict[str, Any]:
 
     cost_by_role = aggregate_costs_by_role(tdir)
 
+    # Failure patterns
+    failure_patterns: list[dict] = []
+    try:
+        cfg = load_config(mas)
+        threshold = cfg.proposal_similarity_threshold
+    except Exception:
+        threshold = 0.7
+    raw_patterns = read_patterns(mas)
+    for pat in raw_patterns:
+        sim = goal_similarity(task.goal, pat.get("goal_sample", ""))
+        if sim >= threshold:
+            failure_patterns.append(pat)
+    if failure_filter == "blocking":
+        failure_patterns = [
+            p for p in failure_patterns
+            if p.get("count", 0) >= 2 or p.get("terminal_reason") in {
+                "revision_cycles_exhausted", "max_retries_exceeded", "convergence_detected"
+            }
+        ]
+
     return {
         "column": col,
         "task": task,
@@ -220,6 +242,8 @@ def _task_detail(mas: Path, task_id: str) -> dict[str, Any]:
         "logs": logs,
         "task_dir": tdir,
         "current_subtask": current_subtask_info,
+        "failure_patterns": failure_patterns,
+        "failure_filter": failure_filter,
     }
 
 
@@ -312,8 +336,8 @@ def create_app(project: Path | None = None) -> FastAPI:
         )
 
     @app.get("/task/{task_id}", response_class=HTMLResponse)
-    def task_view(task_id: str, request: Request):
-        detail = _task_detail(mas, task_id)
+    def task_view(task_id: str, request: Request, failure_filter: str | None = None):
+        detail = _task_detail(mas, task_id, failure_filter=failure_filter)
         return templates.TemplateResponse(
             request,
             "task.html",
