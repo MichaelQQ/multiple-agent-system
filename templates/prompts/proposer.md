@@ -24,6 +24,11 @@ Pick a different angle, scope it tighter, or address the underlying blocker
 (e.g. add missing infrastructure first) instead of re-proposing the failing
 task.
 
+The `success_patterns` signal lists historically successful task shapes.
+Prefer proposals matching high-count success patterns (count >= 2) for
+proven-reliable approaches — they indicate goals the system has completed
+successfully before.
+
 ## How to pick: ROI ranking
 
 1. **Brainstorm 3-5 candidate tasks** grounded in the signals (repo scan,

@@ -93,6 +93,7 @@ def run_tick(
             _maybe_dispatch_proposer(env)
         from . import patterns as _patterns
         _patterns.refresh(env.mas)
+        _patterns.success_refresh(env.mas)
     finally:
         lock.close()
 

@@ -589,6 +589,19 @@ def create_app(project: Path | None = None) -> FastAPI:
         daemon.stop(proj)
         return RedirectResponse("/", status_code=303)
 
+    @app.get("/success-patterns", response_class=HTMLResponse)
+    def success_patterns_view(request: Request):
+        from ..patterns import read_success_patterns
+        patterns = read_success_patterns(mas)
+        return templates.TemplateResponse(
+            request,
+            "success_patterns.html",
+            {
+                "patterns": patterns,
+                "project": str(proj),
+            },
+        )
+
     @app.get("/trace/{task_id}", response_class=HTMLResponse)
     def trace_view(task_id: str, request: Request):
         located = board.find_task(mas, task_id)

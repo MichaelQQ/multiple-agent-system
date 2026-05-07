@@ -467,6 +467,32 @@ At the end of every tick, mas regenerates `.mas/patterns.jsonl` from the content
 
 During proposal materialization, `_materialize_proposal` in `tick.py` calls `_blocked_by_failure_pattern()` to check each candidate against `patterns.jsonl`. Proposals matching a pattern with `count >= 2` or a terminal reason (`revision_cycles_exhausted`, `max_retries_exceeded`, `convergence_detected`) are skipped using `goal_similarity` from `src/mas/roles.py` — preventing the board from looping on the same shape. Best-effort: pattern-index errors never abort a tick.
 
+### Success-pattern tracking
+
+At the end of every tick, mas also regenerates `.mas/success_patterns.jsonl` from the contents of `tasks/done/`. Each line is a JSON object describing a recurring success pattern: tasks with the same normalized goal tokens collapse to one record with running averages of duration and cost.
+
+**SuccessPattern schema fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `signature` | string | Normalized goal tokens (canonical form) |
+| `goal_sample` | string | Truncated sample of the original goal text |
+| `count` | int | Number of successful tasks sharing this signature |
+| `avg_duration_s` | float or null | Running average wall-clock duration across aggregated tasks |
+| `avg_cost_usd` | float or null | Running average cost across aggregated tasks |
+| `task_ids` | list[str] | Task IDs contributing to this pattern |
+| `success_context` | dict | Context from evaluator verdict (verdict, notes) |
+
+During proposal materialization, the proposer reads the top 10 success patterns (via `ProposerSignals.success_patterns`) and biases toward high-count patterns when suggesting new work — promoting approaches that have historically succeeded.
+
+Access success patterns programmatically:
+
+```sh
+curl http://localhost:8080/success-patterns
+```
+
+Or view them in the web UI at `/success-patterns`.
+
 ## Upgrading templates
 
 ```sh
@@ -593,6 +619,7 @@ and log tails. Tasks within each column are sorted by most recent transition
 | Board       | `/`                   | Kanban view; run tick, start/stop daemon, prune, upgrade          |
 | Events      | `/events`             | Cross-task audit feed with `task/role/status/event/limit` filters |
 | Stats       | `/stats`              | Aggregate board counts, token usage, and cost totals with per-role breakdown; accepts `?since=<window>` (e.g. `1h`, `7d`) to filter by recency |
+| Success Patterns | `/success-patterns` | Browse top success patterns from `done/` tasks with signature, count, avg duration/cost |
 | Validate    | `/validate`           | Runs `validate_environment` and shows providers/roles summary     |
 | Cron        | `/cron`               | Inspect, install, and uninstall the per-project cron entry        |
 | Config      | `/config/roles`       | Edit `.mas/roles.yaml` in-browser with YAML + pydantic validation |
