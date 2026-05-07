@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Cost estimation on task detail view**: the task detail page (`/task/<id>`) now shows an estimated cost per role before dispatch. Baselines are computed from historical per-role medians with ±standard deviation uncertainty, displayed as `$X.XX ± $Y.YY`. Estimates require ≥ 3 completed subtasks per role; otherwise "Estimate unavailable" is shown. The total is summed from per-role estimates. Implemented in `src/mas/cost_helpers.py` with `estimate_task_cost()`.
+
 - **Stuck-task detection**: the tick loop now detects tasks that are stuck and marks them accordingly.
   - New `StuckDetectionConfig` schema with `current_subtask_timeout_hours` (default 8) and `task_idle_timeout_hours` (default 24). Negative values are rejected by a Pydantic validator.
   - New `MasConfig.stuck_detection` field (`StuckDetectionConfig`, defaults to factory instance).

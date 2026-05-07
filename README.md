@@ -396,6 +396,26 @@ curl http://localhost:8080/costs/at-risk      # task IDs flagged as >80% of budg
 
 Both endpoints return JSON with graceful fallbacks (empty results or zero values) when budget is unset or pricing data is unavailable.
 
+### Cost estimation
+
+The task detail view (`/task/<id>`) now shows an estimated cost before you run a task, computed from historical data in `done/` tasks.
+
+- **Baselines**: `estimate_task_cost()` scans completed tasks, reads every subtask `result.json`, and groups `cost_usd` by role. For each role it computes the **median** (baseline) and **standard deviation** (uncertainty band).
+- **Threshold**: estimates are shown only when there are **≥ 3** completed subtasks for that role; otherwise the UI displays "Estimate unavailable".
+- **Display**: when available, the UI renders `$X.XX ± $Y.YY` per role. The task detail page sums per-role estimates into a total.
+
+Example of the UI on a task detail page:
+
+| Role | Estimated Cost |
+|------|---------------|
+| orchestrator | $0.0034 ± $0.0012 |
+| implementer | $0.0123 ± $0.0045 |
+| tester | $0.0089 ± $0.0031 |
+| evaluator | $0.0012 ± $0.0008 |
+| **Total** | **$0.0258** |
+
+The estimation is computed live when rendering the task detail page and never blocks dispatch.
+
 ## Stats
 
 ```sh

@@ -130,6 +130,40 @@
 </table>
 {% endif %}
 
+{% if cost_estimate %}
+<h2>Estimated Cost</h2>
+<table>
+  <tr>
+    <th>Role</th><th>Estimate</th>
+  </tr>
+  {% set has_roles = namespace(value=false) %}
+  {% for role, est in cost_estimate.items() %}
+    {% if role != "total" %}
+      {% set has_roles.value = true %}
+    <tr>
+      <td><span class="pill pill-role">{{ role }}</span></td>
+      <td class="mono">
+        {% if est.available %}
+          ${{ "%.2f"|format(est.estimated_usd) }} ± ${{ "%.2f"|format(est.uncertainty_usd) }}
+        {% else %}
+          Estimate unavailable
+        {% endif %}
+      </td>
+    </tr>
+    {% endif %}
+  {% endfor %}
+  {% if not has_roles.value %}
+  <tr>
+    <td colspan="2" class="mono">Estimate unavailable</td>
+  </tr>
+  {% endif %}
+  <tr style="background: var(--surface-alt); font-weight: 600;">
+    <td>Total</td>
+    <td class="mono">${{ "%.2f"|format(cost_estimate.total) }}</td>
+  </tr>
+</table>
+{% endif %}
+
 {% if logs %}
 <h2>Logs</h2>
 <div class="log-tabs">
