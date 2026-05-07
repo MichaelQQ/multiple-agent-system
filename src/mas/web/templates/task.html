@@ -132,14 +132,30 @@
 
 {% if logs %}
 <h2>Logs</h2>
+<div class="role-filters" style="margin-bottom:8px">
+  <button onclick="filterRole('all', this)" class="role-btn active">All</button>
+  <button onclick="filterRole('proposer', this)" class="role-btn">proposer</button>
+  <button onclick="filterRole('orchestrator', this)" class="role-btn">orchestrator</button>
+  <button onclick="filterRole('implementer', this)" class="role-btn">implementer</button>
+  <button onclick="filterRole('tester', this)" class="role-btn">tester</button>
+  <button onclick="filterRole('evaluator', this)" class="role-btn">evaluator</button>
+</div>
 <div class="log-tabs">
   {% for lg in logs %}
-    <a href="#" onclick="showLog('{{ lg }}', this); return false;" data-log="{{ lg }}">{{ lg }}</a>
+    <a href="#" onclick="showLog('{{ lg.name }}', this); return false;" data-log="{{ lg.name }}" data-role="{{ lg.role }}">{{ lg.name }}</a>
   {% endfor %}
 </div>
 <pre id="log-view">(loading…)</pre>
 <script>
   const TASK_ID = {{ task_id|tojson }};
+  function filterRole(role, btn) {
+    document.querySelectorAll('.role-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.log-tabs a').forEach(a => {
+      if (role === 'all' || a.dataset.role === role) a.style.display = '';
+      else a.style.display = 'none';
+    });
+  }
   async function showLog(name, el) {
     const r = await fetch(`/task/${TASK_ID}/log/${name}?lines=500`);
     document.getElementById('log-view').textContent = await r.text();
@@ -150,8 +166,11 @@
       if (match) match.classList.add('active');
     }
   }
-  {% if logs %}showLog({{ logs[-1]|tojson }});{% endif %}
+  {% if logs %}showLog({{ logs[-1].name|tojson }});{% endif %}
 </script>
+{% else %}
+<h2>Logs</h2>
+<p class="no-logs">No logs available</p>
 {% endif %}
 
 {% if audit %}

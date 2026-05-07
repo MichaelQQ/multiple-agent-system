@@ -762,3 +762,148 @@ class TestStatsPage:
         # success_rate = 1/2 = 50%, revision_rate = 0%
         assert "50.0%" in body or "50%" in body, \
             "Expected 50% success rate rendered as a percentage"
+
+
+# ---------------------------------------------------------------------------
+# /task/<id>/logs JSON endpoint tests
+# ---------------------------------------------------------------------------
+
+def test_logs_endpoint_returns_log_list_with_metadata(project: Path, client: TestClient):
+    """GET /task/<id>/logs returns JSON with logs array containing name, role, size."""
+    mas = project / ".mas"
+    task_id = "20260507-logs-1111"
+    tdir = _put_task(mas, "doing", task_id)
+    log_dir = tdir / "logs"
+    log_dir.mkdir()
+    (log_dir / "implementer-1.log").write_text("line1\nline2\n")
+    (log_dir / "tester-1.log").write_text("test log\n")
+
+    r = client.get(f"/task/{task_id}/logs")
+    assert r.status_code == 200
+    data = r.json()
+    assert "logs" in data
+    assert len(data["logs"]) == 2
+    assert data["logs"][0]["name"] == "implementer-1.log"
+    assert data["logs"][0]["role"] == "implementer"
+    assert data["logs"][0]["size"] > 0
+
+
+def test_logs_endpoint_filters_by_role(project: Path, client: TestClient):
+    """GET /task/<id>/logs?role=implementer returns only matching logs."""
+    mas = project / ".mas"
+    task_id = "20260507-logs-2222"
+    tdir = _put_task(mas, "doing", task_id)
+    log_dir = tdir / "logs"
+    log_dir.mkdir()
+    (log_dir / "implementer-1.log").write_text("impl\n")
+    (log_dir / "tester-1.log").write_text("test\n")
+    (log_dir / "implementer-2.log").write_text("impl2\n")
+
+    r = client.get(f"/task/{task_id}/logs?role=implementer")
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data["logs"]) == 2
+    assert all(entry["role"] == "implementer" for entry in data["logs"])
+
+
+def test_logs_endpoint_returns_empty_for_missing_logs_dir(project: Path, client: TestClient):
+    """GET /task/<id>/logs with no logs directory returns {'logs': []}."""
+    mas = project / ".mas"
+    task_id = "20260507-logs-3333"
+    _put_task(mas, "doing", task_id)
+
+    r = client.get(f"/task/{task_id}/logs")
+    assert r.status_code == 200
+    data = r.json()
+    assert data == {"logs": []}
+
+
+def test_logs_endpoint_returns_404_for_nonexistent_task(client: TestClient):
+    """GET /task/<id>/logs for nonexistent task returns 404."""
+    r = client.get("/task/20260507-nonexistent-0000/logs")
+    assert r.status_code == 404
+
+
+def test_logs_endpoint_returns_empty_for_nonexistent_role(project: Path, client: TestClient):
+    """GET /task/<id>/logs?role=nonexistent returns {'logs': []}."""
+    mas = project / ".mas"
+    task_id = "20260507-logs-4444"
+    tdir = _put_task(mas, "doing", task_id)
+    log_dir = tdir / "logs"
+    log_dir.mkdir()
+    (log_dir / "implementer-1.log").write_text("impl\n")
+
+    r = client.get(f"/task/{task_id}/logs?role=nonexistent")
+    assert r.status_code == 200
+    data = r.json()
+    assert data == {"logs": []}
+
+
+def test_logs_endpoint_multiple_roles_present(project: Path, client: TestClient):
+    """Multiple roles: verify unfiltered returns all, filtered returns only requested."""
+    mas = project / ".mas"
+    task_id = "20260507-logs-5555"
+    tdir = _put_task(mas, "doing", task_id)
+    log_dir = tdir / "logs"
+    log_dir.mkdir()
+    (log_dir / "implementer-1.log").write_text("i1\n")
+    (log_dir / "tester-1.log").write_text("t1\n")
+    (log_dir / "evaluator-1.log").write_text("e1\n")
+    (log_dir / "implementer-2.log").write_text("i2\n")
+
+    # Unfiltered: all 4 logs
+    r = client.get(f"/task/{task_id}/logs")
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data["logs"]) == 4
+    roles = [entry["role"] for entry in data["logs"]]
+    assert roles.count("implementer") == 2
+    assert roles.count("tester") == 1
+    assert roles.count("evaluator") == 1
+
+    # Filtered: only tester
+    r = client.get(f"/task/{task_id}/logs?role=tester")
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data["logs"]) == 1
+    assert data["logs"][0]["role"] == "tester"
+
+
+def test_logs_endpoint_extracts_role_from_filenames(project: Path, client: TestClient):
+    """Verify role extraction from various log filename patterns."""
+    mas = project / ".mas"
+    task_id = "20260507-logs-6666"
+    tdir = _put_task(mas, "doing", task_id)
+    log_dir = tdir / "logs"
+    log_dir.mkdir()
+    # Various naming conventions
+    (log_dir / "implementer-1.log").write_text("i1\n")
+    (log_dir / "tester.claude_code.log").write_text("t1\n")
+    (log_dir / "orchestrator-2.log").write_text("o2\n")
+    (log_dir / "evaluator.codex.log").write_text("e1\n")
+
+    r = client.get(f"/task/{task_id}/logs")
+    assert r.status_code == 200
+    data = r.json()
+    name_to_role = {entry["name"]: entry["role"] for entry in data["logs"]}
+    assert name_to_role["implementer-1.log"] == "implementer"
+    assert name_to_role["tester.claude_code.log"] == "tester"
+    assert name_to_role["orchestrator-2.log"] == "orchestrator"
+    assert name_to_role["evaluator.codex.log"] == "evaluator"
+
+
+def test_logs_endpoint_includes_size_in_bytes(project: Path, client: TestClient):
+    """Each log entry must include accurate size in bytes."""
+    mas = project / ".mas"
+    task_id = "20260507-logs-7777"
+    tdir = _put_task(mas, "doing", task_id)
+    log_dir = tdir / "logs"
+    log_dir.mkdir()
+    content = "line1\nline2\nline3\n"
+    (log_dir / "implementer-1.log").write_text(content)
+
+    r = client.get(f"/task/{task_id}/logs")
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data["logs"]) == 1
+    assert data["logs"][0]["size"] == len(content.encode("utf-8"))

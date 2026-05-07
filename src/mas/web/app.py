@@ -193,9 +193,15 @@ def _task_detail(mas: Path, task_id: str) -> dict[str, Any]:
     ]
 
     log_dir = tdir / "logs"
-    logs: list[str] = []
+    logs: list[dict[str, str]] = []
     if log_dir.exists():
-        logs = sorted(p.name for p in log_dir.glob("*.log"))
+        for p in sorted(log_dir.glob("*.log")):
+            stem = p.name
+            if "-" in stem:
+                role = stem.split("-", 1)[0]
+            else:
+                role = stem.split(".", 1)[0]
+            logs.append({"name": p.name, "role": role})
 
     budget = getattr(task, "cost_budget_usd", None)
 
@@ -336,6 +342,27 @@ def create_app(project: Path | None = None) -> FastAPI:
         if not log_path.exists():
             raise HTTPException(404, f"log not found: {log_name}")
         return _read_log_tail(log_path, lines=lines)
+
+    @app.get("/task/{task_id}/logs")
+    def task_logs_list(task_id: str, role: str | None = None):
+        located = board.find_task(mas, task_id)
+        if located is None:
+            raise HTTPException(404, f"task not found: {task_id}")
+        _, tdir = located
+        log_dir = tdir / "logs"
+        logs = []
+        if log_dir.exists():
+            for p in sorted(log_dir.glob("*.log")):
+                # Extract role: first segment before '-' or '.'
+                stem = p.name
+                if "-" in stem:
+                    extracted_role = stem.split("-", 1)[0]
+                else:
+                    extracted_role = stem.split(".", 1)[0]
+                logs.append({"name": p.name, "role": extracted_role, "size": p.stat().st_size})
+        if role is not None:
+            logs = [entry for entry in logs if entry["role"] == role]
+        return {"logs": logs}
 
     @app.get("/events", response_class=HTMLResponse)
     def events_view(
