@@ -235,6 +235,13 @@ def _task_detail(mas: Path, task_id: str, failure_filter: str | None = None) -> 
             }
         ]
 
+    cost_estimate = None
+    try:
+        from ..cost_helpers import estimate_task_cost
+        cost_estimate = estimate_task_cost(mas, col, task.id)
+    except Exception:
+        cost_estimate = None
+
     return {
         "column": col,
         "task": task,
@@ -242,6 +249,7 @@ def _task_detail(mas: Path, task_id: str, failure_filter: str | None = None) -> 
         "subtasks": subtasks,
         "cost_totals": cost_totals,
         "cost_by_role": cost_by_role,
+        "cost_estimate": cost_estimate,
         "budget": budget,
         "transitions": txns,
         "audit": audit,
