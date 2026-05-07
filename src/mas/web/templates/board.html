@@ -53,6 +53,62 @@
   </div>
 </div>
 
+<div class="card">
+  <details {% if filters and (filters.task_id or filters.status or filters.cost_min or filters.cost_max or filters.failure_reason or filters.date_from or filters.date_to) %}open{% endif %}>
+    <summary style="cursor:pointer; font-weight:600;">Filter tasks</summary>
+    <form method="get" action="/" style="margin-top:8px; display:grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap:8px; align-items:end;">
+      <div>
+        <label style="font-size:12px;">Task ID (substring)</label><br>
+        <input type="text" name="task_id" value="{{ filters.task_id or '' }}" style="width:100%;">
+      </div>
+      <div>
+        <label style="font-size:12px;">Status</label><br>
+        {% set status_vals = filters.status or [] %}
+        <label style="font-size:12px;"><input type="checkbox" name="status" value="proposed" {% if 'proposed' in status_vals %}checked{% endif %}> proposed</label>
+        <label style="font-size:12px;"><input type="checkbox" name="status" value="doing" {% if 'doing' in status_vals %}checked{% endif %}> doing</label>
+        <label style="font-size:12px;"><input type="checkbox" name="status" value="done" {% if 'done' in status_vals %}checked{% endif %}> done</label>
+        <label style="font-size:12px;"><input type="checkbox" name="status" value="failed" {% if 'failed' in status_vals %}checked{% endif %}> failed</label>
+      </div>
+      <div>
+        <label style="font-size:12px;">Cost min ($)</label><br>
+        <input type="number" name="cost_min" step="0.01" value="{{ filters.cost_min if filters.cost_min is not none else '' }}" style="width:100%;">
+      </div>
+      <div>
+        <label style="font-size:12px;">Cost max ($)</label><br>
+        <input type="number" name="cost_max" step="0.01" value="{{ filters.cost_max if filters.cost_max is not none else '' }}" style="width:100%;">
+      </div>
+      <div>
+        <label style="font-size:12px;">Failure reason</label><br>
+        <input type="text" name="failure_reason" value="{{ filters.failure_reason or '' }}" style="width:100%;">
+      </div>
+      <div>
+        <label style="font-size:12px;">Date from</label><br>
+        <input type="date" name="date_from" value="{{ filters.date_from or '' }}" style="width:100%;">
+      </div>
+      <div>
+        <label style="font-size:12px;">Date to</label><br>
+        <input type="date" name="date_to" value="{{ filters.date_to or '' }}" style="width:100%;">
+      </div>
+      <div style="display:flex; gap:8px; align-items:end;">
+        <button type="submit">Apply</button>
+        <a href="/" style="font-size:12px;">Clear</a>
+      </div>
+    </form>
+  </details>
+</div>
+
+{% set total_count = total_count if total_count is defined else none %}
+{% set filtered_count = filtered_count if filtered_count is defined else none %}
+{% if total_count is not none and filtered_count is not none %}
+  <div style="font-size:13px; color:var(--text-muted); margin:8px 0;">
+    {% if filtered_count == total_count %}
+      {{ total_count }} tasks
+    {% else %}
+      {{ filtered_count }} of {{ total_count }} tasks
+    {% endif %}
+  </div>
+{% endif %}
+
 <form method="post" action="/tasks/delete" id="bulk-form"
       onsubmit="return confirmBulkDelete(this);">
   <div class="bulk-bar" style="display:flex; align-items:center; gap:12px; margin:8px 0;">

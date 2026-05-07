@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import TypeAdapter
@@ -67,10 +67,40 @@ def _subtask_status(child_dir: Path) -> str:
     return r.status
 
 
-def _board_rows(mas: Path) -> dict[str, list[dict[str, Any]]]:
+def _board_rows(
+    mas: Path,
+    task_id: str | None = None,
+    status: list[str] | None = None,
+    cost_min: float | None = None,
+    cost_max: float | None = None,
+    failure_reason: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> tuple[dict[str, list[dict[str, Any]]], int, int]:
+    from datetime import date as _date
+
     rows: dict[str, list[dict[str, Any]]] = {c: [] for c in board.COLUMNS}
+    total_count = 0
+    filtered_count = 0
+
+    status_set = set(s.lower() for s in status) if status else set()
+
+    date_from_obj = None
+    date_to_obj = None
+    if date_from:
+        try:
+            date_from_obj = _date.fromisoformat(date_from)
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            date_to_obj = _date.fromisoformat(date_to)
+        except ValueError:
+            pass
+
     for col in board.COLUMNS:
         for tdir in board.list_column(mas, col):
+            total_count += 1
             try:
                 t = board.read_task(tdir)
                 goal = t.goal
@@ -80,6 +110,46 @@ def _board_rows(mas: Path) -> dict[str, list[dict[str, Any]]]:
                 goal = "(unreadable)"
                 role = "?"
                 created_at = ""
+
+            # status filter
+            if status_set and col.lower() not in status_set:
+                continue
+
+            # task_id filter (case-insensitive substring match on dir name)
+            if task_id and task_id.lower() not in tdir.name.lower():
+                continue
+
+            # date filter
+            if date_from_obj or date_to_obj:
+                try:
+                    task_date = t.created_at.astimezone().date()
+                    if date_from_obj and task_date < date_from_obj:
+                        continue
+                    if date_to_obj and task_date > date_to_obj:
+                        continue
+                except Exception:
+                    continue
+
+            # failure_reason filter
+            if failure_reason:
+                try:
+                    r = board.read_result(tdir)
+                    summary = (r.summary or "") if r else ""
+                    if failure_reason.lower() not in summary.lower():
+                        continue
+                except Exception:
+                    continue
+
+            # cost filter
+            if cost_min is not None or cost_max is not None:
+                rollup = aggregate_costs_by_role(tdir)
+                total_cost = sum(float(v["cost_usd"]) for v in rollup.values())
+                if cost_min is not None and total_cost < cost_min:
+                    continue
+                if cost_max is not None and total_cost > cost_max:
+                    continue
+
+            filtered_count += 1
             latest_txn = transitions.read_transitions(tdir, limit=1)
             last_move_ts = latest_txn[-1].timestamp if latest_txn else ""
             last_move = _fmt_local(last_move_ts) if last_move_ts else ""
@@ -100,7 +170,7 @@ def _board_rows(mas: Path) -> dict[str, list[dict[str, Any]]]:
                 }
             )
         rows[col].sort(key=lambda r: r["sort_key"], reverse=True)
-    return rows
+    return rows, total_count, filtered_count
 
 
 def _progress_counts(parent_dir: Path) -> str:
@@ -320,7 +390,21 @@ def create_app(project: Path | None = None) -> FastAPI:
     templates.env.filters["md"] = _render_markdown
 
     @app.get("/", response_class=HTMLResponse)
-    def index(request: Request, tick_pid: int | None = None, pruned: int | None = None, upgrade_pid: int | None = None, deleted: str | None = None, deleted_count: int | None = None):
+    def index(
+        request: Request,
+        tick_pid: int | None = None,
+        pruned: int | None = None,
+        upgrade_pid: int | None = None,
+        deleted: str | None = None,
+        deleted_count: int | None = None,
+        task_id: str | None = None,
+        status: list[str] | None = Query(default=None),
+        cost_min: float | None = None,
+        cost_max: float | None = None,
+        failure_reason: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ):
         pid, running = daemon.status(proj)
         flash = None
         if tick_pid:
@@ -335,17 +419,38 @@ def create_app(project: Path | None = None) -> FastAPI:
             flash = f"deleted {deleted_count} task(s)"
         from ..cost_helpers import at_risk_tasks as _at_risk_tasks
         at_risk = _at_risk_tasks(mas)
+        rows, total_count, filtered_count = _board_rows(
+            mas,
+            task_id=task_id,
+            status=status,
+            cost_min=cost_min,
+            cost_max=cost_max,
+            failure_reason=failure_reason,
+            date_from=date_from,
+            date_to=date_to,
+        )
         return templates.TemplateResponse(
             request,
             "board.html",
             {
-                "rows": _board_rows(mas),
+                "rows": rows,
                 "columns": list(board.COLUMNS),
                 "daemon_pid": pid,
                 "daemon_running": running,
                 "project": str(proj),
                 "flash": flash,
                 "at_risk_tasks": at_risk,
+                "total_count": total_count,
+                "filtered_count": filtered_count,
+                "filters": {
+                    "task_id": task_id or "",
+                    "status": status or [],
+                    "cost_min": cost_min,
+                    "cost_max": cost_max,
+                    "failure_reason": failure_reason or "",
+                    "date_from": date_from or "",
+                    "date_to": date_to or "",
+                },
             },
         )
 

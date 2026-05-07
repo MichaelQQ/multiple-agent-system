@@ -629,11 +629,25 @@ mas web --host 127.0.0.1 --port 8765
 
 The local UI shows the board, task details, recent audit events, cost totals,
 and log tails. Tasks within each column are sorted by most recent transition
-(newest first). The header navigation exposes seven pages:
+(newest first). The board page includes a collapsible **filter form** with
+server-side filtering and URL query parameter persistence for shareability:
+
+| Filter | Param | Description |
+|---|---|---|
+| Task ID | `task_id` | Substring match on task ID |
+| Status | `status` | One of `proposed`, `doing`, `done`, `failed` |
+| Cost range | `cost_min`, `cost_max` | USD range (float); empty = no bound |
+| Failure reason | `failure_reason` | Substring match on `Task.stuck_reason` / failure text |
+| Date range | `date_from`, `date_to` | ISO-8601 bounds (inclusive) |
+
+Empty filters show all tasks. Filter state is encoded in the URL query string
+(e.g. `/?status=failed&cost_max=0.05`) so links can be copied and shared.
+
+The header navigation exposes seven pages:
 
 | Page        | Route                 | Purpose                                                           |
 |-------------|------------------------|-------------------------------------------------------------------|
-| Board       | `/`                   | Kanban view; run tick, start/stop daemon, prune, upgrade          |
+| Board       | `/`                   | Kanban view with server-side filtering (task_id, status, cost, failure_reason, date range); run tick, start/stop daemon, prune, upgrade          |
 | Events      | `/events`             | Cross-task audit feed with `task/role/status/event/limit` filters |
 | Stats       | `/stats`              | Aggregate board counts, token usage, and cost totals with per-role breakdown; accepts `?since=<window>` (e.g. `1h`, `7d`) to filter by recency |
 | Validate    | `/validate`           | Runs `validate_environment` and shows providers/roles summary     |

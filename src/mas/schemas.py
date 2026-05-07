@@ -12,7 +12,7 @@ Role = Literal["proposer", "orchestrator", "implementer", "tester", "evaluator",
 Status = Literal["success", "failure", "needs_revision", "environment_error"]
 Verdict = Literal["pass", "fail", "needs_revision"]
 
-_TASK_ID_PATTERN = re.compile(r"^\d{8}-[a-zA-Z0-9_-]+-[a-f0-9]{4}$")
+_TASK_ID_PATTERN = re.compile(r"^\d{8}-[a-zA-Z0-9_-]+-[a-f0-9]{4}$|^[a-zA-Z0-9_-]+$")
 
 
 @dataclass
