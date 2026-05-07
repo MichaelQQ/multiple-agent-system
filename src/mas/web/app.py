@@ -22,7 +22,7 @@ from pydantic import TypeAdapter
 from .. import board, cron, current_subtask, daemon, transitions, worktree
 from ..audit import read_events
 from ..config import load_config, project_dir, project_root, validate_environment
-from ..cost_helpers import aggregate_costs_by_role, at_risk_tasks
+from ..cost_helpers import aggregate_costs_by_role, at_risk_tasks, compute_role_baselines, detect_anomalies
 from ..events import read_board_events
 from ..schemas import RoleConfig
 from ..stats import compute_stats, parse_since
@@ -207,6 +207,21 @@ def _task_detail(mas: Path, task_id: str) -> dict[str, Any]:
 
     cost_by_role = aggregate_costs_by_role(tdir)
 
+    baselines = compute_role_baselines(mas)
+    is_anomaly = False
+    if baselines:
+        # Check task's own result (top-level task in done/doing)
+        if result and result.cost_usd and task.role in baselines:
+            if float(result.cost_usd) > 2.0 * baselines[task.role]:
+                is_anomaly = True
+        # Check subtasks
+        if not is_anomaly:
+            for s in subtasks:
+                if s.get("cost_usd") and s.get("role") in baselines:
+                    if float(s["cost_usd"]) > 2.0 * baselines[s["role"]]:
+                        is_anomaly = True
+                        break
+
     return {
         "column": col,
         "task": task,
@@ -214,6 +229,7 @@ def _task_detail(mas: Path, task_id: str) -> dict[str, Any]:
         "subtasks": subtasks,
         "cost_totals": cost_totals,
         "cost_by_role": cost_by_role,
+        "is_anomaly": is_anomaly,
         "budget": budget,
         "transitions": txns,
         "audit": audit,
@@ -527,12 +543,14 @@ def create_app(project: Path | None = None) -> FastAPI:
                     cost_by_role[role]["cost_usd"] = float(cost_by_role[role]["cost_usd"]) + float(info["cost_usd"])
                     cost_by_role[role]["tokens_in"] = int(cost_by_role[role]["tokens_in"]) + int(info["tokens_in"])
                     cost_by_role[role]["tokens_out"] = int(cost_by_role[role]["tokens_out"]) + int(info["tokens_out"])
+        anomalies = detect_anomalies(mas)
         return templates.TemplateResponse(
             request,
             "stats.html",
             {
                 "stats": stats,
                 "cost_by_role": cost_by_role,
+                "anomalies": anomalies,
                 "since": since or "",
                 "error": error,
                 "project": str(proj),

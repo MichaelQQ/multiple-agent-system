@@ -90,6 +90,36 @@
 </div>
 
 <div class="card">
+  <h2>Cost Anomalies Section</h2>
+  {% if anomalies %}
+  <table>
+    <thead>
+      <tr>
+        <th>Task ID</th>
+        <th>Role</th>
+        <th>Actual Cost</th>
+        <th>Baseline</th>
+        <th>Delta</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in anomalies %}
+      <tr>
+        <td><a href="/task/{{ a.task_id }}">{{ a.task_id }}</a></td>
+        <td><span class="pill pill-role">{{ a.role }}</span></td>
+        <td>${{ "%.6f"|format(a.actual_cost) }}</td>
+        <td>${{ "%.6f"|format(a.baseline) }}</td>
+        <td>${{ "%.6f"|format(a.delta) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>No anomalies detected</p>
+  {% endif %}
+</div>
+
+<div class="card">
   <h2>Outcome Rates</h2>
   <table>
     <tbody>
