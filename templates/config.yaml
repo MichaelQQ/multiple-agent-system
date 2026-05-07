@@ -1,5 +1,8 @@
 max_proposed: 10
 
+# Controls when the dashboard shows budget depletion warnings (in days)
+forecast_warning_days_threshold: 7
+
 providers:
   claude-code:
     cli: claude

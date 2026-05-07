@@ -250,6 +250,7 @@ class MasConfig(BaseModel):
     max_proposed: int = 10
     proposal_similarity_threshold: float = 0.7
     default_cost_budget_usd: float | None = None
+    forecast_warning_days_threshold: int = Field(default=7, ge=0)
     plan_consensus_threshold_usd: float | None = None
     max_replans: int = 1
     webhooks: list[WebhookConfig] = Field(default_factory=list)
