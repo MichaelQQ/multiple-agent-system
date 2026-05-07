@@ -620,6 +620,24 @@ and log tails. Tasks within each column are sorted by most recent transition
 | Cron        | `/cron`               | Inspect, install, and uninstall the per-project cron entry        |
 | Config      | `/config/roles`       | Edit `.mas/roles.yaml` in-browser with YAML + pydantic validation |
 | Trace       | `/trace/<task_id>`    | Per-task stage-by-stage timeline: role, wall-clock, tokens, cost, and status for each subtask; in-flight stages highlighted |
+| Task detail | `/task/<id>`          | Task info, plan/subtasks, audit timeline, cost totals, and **logs viewer** with role filtering |
+
+### Logs viewer
+
+The task detail page (`/task/<id>`) includes a logs viewer tab that discovers and serves log files from the task's `logs/` directory. Log files are named with the pattern `{role}-{n}.log` or `{role}.{provider}.log` — the role is extracted as the prefix before the first `-` or `.`.
+
+**API endpoint:** `GET /task/<id>/logs` returns JSON with a `logs` array. Each entry has `name`, `role`, and `size` (bytes):
+
+```json
+{"logs": [{"name": "implementer-1.log", "role": "implementer", "size": 1234}]}
+```
+
+Query parameters:
+- `?role=<name>` — filter results to a specific role (e.g., `?role=implementer`)
+
+Returns `{"logs": []}` when the logs directory doesn't exist or no files match the filter. Returns HTTP 404 for nonexistent tasks.
+
+The web UI renders role filter buttons (All, proposer, orchestrator, implementer, tester, evaluator) above the logs list. When no logs are available, a "No logs available" message is shown.
 
 The **Config → Roles** page (`/config/roles`) lets you edit `.mas/roles.yaml`
 directly in the browser. On submit, the content is validated as YAML and then
