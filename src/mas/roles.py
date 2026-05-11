@@ -215,6 +215,7 @@ def gather_proposer_signals(
 
     from . import patterns as _patterns
     signals["failure_patterns"] = _patterns.read_patterns(_mas, limit=20)
+    signals["success_patterns"] = _patterns.read_success_patterns(_mas, limit=10)
 
     return ProposerSignals.model_validate(signals)
 

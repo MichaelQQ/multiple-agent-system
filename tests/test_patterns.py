@@ -257,9 +257,13 @@ max_proposed: 0
     assert "20260505-tick-suffix-2222" in records[0]["task_ids"]
 
 
-def test_proposer_signals_include_failure_patterns(mas, tmp_path):
+def test_proposer_signals_include_failure_patterns(mas, tmp_path, monkeypatch):
     """gather_proposer_signals must surface read_patterns() output."""
     from mas.roles import gather_proposer_signals
+    from mas.patterns import read_success_patterns
+
+    # Stub out read_success_patterns to avoid NotImplementedError
+    monkeypatch.setattr("mas.patterns.read_success_patterns", lambda *a, **kw: [])
 
     _make_failed_task(
         mas,
@@ -275,3 +279,212 @@ def test_proposer_signals_include_failure_patterns(mas, tmp_path):
     rec = signals.failure_patterns[0]
     assert rec["terminal_reason"].startswith("convergence_detected")
     assert "20260505-gather-3333" in rec["task_ids"]
+
+
+# --- Success pattern tests -------------------------------------------------
+
+
+def _make_done_task(
+    mas,
+    *,
+    task_id: str,
+    goal: str,
+    duration_s: float = 0.0,
+    cost_usd: float | None = None,
+    verdict: str = "pass",
+    role: str = "implementer",
+) -> None:
+    """Create a fixture done/ task with task.json, result.json, and transitions."""
+    # Ensure task_id matches pattern: {yyyymmdd}-{slug}-{hash4}
+    import re
+    if not re.match(r"^\d{8}-[a-zA-Z0-9_-]+-[a-f0-9]{4}$", task_id):
+        # Generate a valid task_id if the provided one doesn't match
+        from mas.ids import task_id as new_task_id
+        task_id = new_task_id(goal, salt=task_id)
+
+    done = mas / "tasks" / "done" / task_id
+    done.mkdir(parents=True, exist_ok=True)
+    from mas.schemas import Task
+    from mas import transitions as _transitions
+    board.write_task(done, Task(id=task_id, role=role, goal=goal))
+    _transitions.log_transition(done, "proposed", "doing", "manual_promote")
+    _transitions.log_transition(done, "doing", "done", "role_success")
+    from mas.schemas import Result
+    result = Result(
+        task_id=task_id,
+        status="success",
+        summary=goal,
+        duration_s=duration_s,
+        cost_usd=cost_usd,
+        verdict=verdict,
+    )
+    (done / "result.json").write_text(result.model_dump_json(indent=2))
+
+
+def test_compute_success_patterns_empty_when_no_done_tasks(mas):
+    from mas.patterns import compute_success_patterns
+    assert compute_success_patterns(mas) == []
+
+
+def test_compute_success_patterns_groups_by_normalized_goal(mas):
+    from mas.patterns import compute_success_patterns
+    _make_done_task(mas, task_id="20260506-add-mcp-tool-aaaa", goal="Add an MCP tool", duration_s=10.0, cost_usd=0.50)
+    _make_done_task(mas, task_id="20260506-add-mcp-tool-bbbb", goal="add MCP tool", duration_s=20.0, cost_usd=1.50)
+    patterns = compute_success_patterns(mas)
+    assert len(patterns) == 1
+    assert patterns[0].count == 2
+    assert set(patterns[0].task_ids) == {"20260506-add-mcp-tool-aaaa", "20260506-add-mcp-tool-bbbb"}
+
+
+def test_compute_success_patterns_captures_duration_and_cost(mas):
+    from mas.patterns import compute_success_patterns
+    _make_done_task(mas, task_id="20260506-add-caching-cccc", goal="Add caching", duration_s=10.0, cost_usd=0.50)
+    _make_done_task(mas, task_id="20260506-add-caching-dddd", goal="Add caching", duration_s=30.0, cost_usd=1.50)
+    patterns = compute_success_patterns(mas)
+    assert len(patterns) == 1
+    assert patterns[0].avg_duration_s == 20.0
+    assert patterns[0].avg_cost_usd == 1.0
+
+
+def test_compute_success_patterns_skips_proposer_role(mas):
+    from mas.patterns import compute_success_patterns
+    _make_done_task(mas, task_id="20260506-proposer-eeee", goal="Propose a new task", role="proposer")
+    assert compute_success_patterns(mas) == []
+
+
+def test_success_signature_collision(mas):
+    from mas.patterns import compute_success_patterns
+    from mas.patterns import SuccessPattern
+    _make_done_task(mas, task_id="20260506-add-feature-ffff", goal="Add feature X")
+    _make_done_task(mas, task_id="20260506-add-feature-gggg", goal="add feature x")
+    patterns = compute_success_patterns(mas)
+    assert len(patterns) == 1
+    sig = patterns[0].signature
+    assert isinstance(sig, str)
+    # Different goal should produce different signature
+    _make_done_task(mas, task_id="20260506-different-hhhh", goal="Completely different goal")
+    patterns2 = compute_success_patterns(mas)
+    sigs = [p.signature for p in patterns2]
+    assert len(set(sigs)) == 2
+
+
+def test_refresh_success_writes_jsonl(mas):
+    from mas.patterns import refresh_success, success_patterns_path, read_success_patterns
+    _make_done_task(mas, task_id="20260506-add-feature-iiii", goal="Add feature", duration_s=5.0)
+    refresh_success(mas)
+    p = success_patterns_path(mas)
+    assert p.exists()
+    first = p.read_text()
+    # Second refresh should produce same output (idempotent)
+    refresh_success(mas)
+    assert p.read_text() == first
+    # Each line is valid JSON that parses to SuccessPattern shape
+    lines = [l for l in first.splitlines() if l.strip()]
+    assert lines
+    for line in lines:
+        import json
+        record = json.loads(line)
+        assert set(record.keys()) >= {
+            "signature", "goal_sample", "count", "task_ids",
+        }
+
+
+def test_read_success_patterns_empty_when_file_missing(mas):
+    from mas.patterns import read_success_patterns
+    assert read_success_patterns(mas) == []
+
+
+def test_read_success_patterns_skips_malformed_lines(mas):
+    from mas.patterns import read_success_patterns, success_patterns_path
+    import json
+    p = success_patterns_path(mas)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    # Write mix of valid and malformed lines
+    p.write_text(
+        '{"signature": "sig1", "goal_sample": "goal", "count": 1, "task_ids": ["t1"]}\n'
+        + "{not valid json}\n"
+        + '{"signature": "sig2"}\n'  # missing required fields
+        + '{"signature": "sig3", "goal_sample": "goal2", "count": 1, "task_ids": ["t2"]}\n'
+    )
+    out = read_success_patterns(mas)
+    assert len(out) == 2
+
+
+def test_refresh_success_called_from_run_tick(mas, tmp_path, monkeypatch):
+    """End-to-end: a tick run produces success_patterns.jsonl from the done/ board."""
+    from mas import tick as tick_mod
+    from mas.config import load_config
+
+    _make_done_task(mas, task_id="20260506-add-tracing-cd34", goal="Add tracing", duration_s=10.0, cost_usd=0.75)
+
+    cfg_yaml = """
+providers:
+  claude-code:
+    cli: claude
+    max_concurrent: 1
+roles:
+  proposer:
+    provider: claude-code
+    model: claude-haiku-4-5-20251001
+    timeout_s: 60
+  orchestrator:
+    provider: claude-code
+    model: claude-opus-4-6
+    timeout_s: 60
+  implementer:
+    provider: claude-code
+    model: claude-sonnet-4-6
+    timeout_s: 60
+  tester:
+    provider: claude-code
+    model: claude-haiku-4-5-20251001
+    timeout_s: 60
+  evaluator:
+    provider: claude-code
+    model: claude-haiku-4-5-20251001
+    timeout_s: 60
+max_proposed: 0
+"""
+    (mas / "config.yaml").write_text(cfg_yaml)
+
+    monkeypatch.setattr(tick_mod, "validate_config", lambda *a, **kw: [])
+    monkeypatch.setattr(tick_mod, "_advance_doing", lambda env: None)
+    monkeypatch.setattr(tick_mod, "_maybe_dispatch_proposer", lambda env: None)
+    monkeypatch.setattr(tick_mod, "_reap_workers", lambda env: None)
+
+    # Do NOT stub refresh_success — let it raise NotImplementedError
+    # so this test fails for the right reason until implementation exists.
+    cfg = load_config(mas)
+    tick_mod.run_tick(start=mas.parent, cfg=cfg)
+
+    from mas.patterns import success_patterns_path, read_success_patterns
+    p = success_patterns_path(mas)
+    assert p.exists()
+    records = read_success_patterns(mas)
+    assert len(records) == 1
+    assert "20260506-add-tracing-cd34" in records[0]["task_ids"]
+
+
+def test_proposer_signals_include_success_patterns(mas, tmp_path):
+    """gather_proposer_signals must surface read_success_patterns() output."""
+    from mas.roles import gather_proposer_signals
+    from mas.patterns import refresh_success
+
+    # Setup: create done task and generate success patterns
+    # Task ID must have valid hex chars in last 4 positions
+    _make_done_task(
+        mas,
+        task_id="20260506-sig-test-ab12",
+        goal="Test success pattern signal inclusion",
+        duration_s=5.0,
+        cost_usd=0.25,
+    )
+    refresh_success(mas)
+
+    # Do NOT patch read_success_patterns — let it raise NotImplementedError
+    # so this test fails for the right reason until implementation exists.
+    signals = gather_proposer_signals(tmp_path, mas_root=mas)
+    assert isinstance(signals.success_patterns, list)
+    assert len(signals.success_patterns) == 1
+    rec = signals.success_patterns[0]
+    assert "20260506-sig-test-ab12" in rec["task_ids"]

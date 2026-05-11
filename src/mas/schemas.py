@@ -201,6 +201,7 @@ class ProposerSignals(BaseModel):
     ideas: str = ""
     ci_output: str = ""
     failure_patterns: list[dict[str, Any]] = Field(default_factory=list)
+    success_patterns: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class BoardSummary(BaseModel):

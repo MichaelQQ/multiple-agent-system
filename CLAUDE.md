@@ -41,7 +41,9 @@ Each adapter's `build_command()` returns the CLI invocation; `dispatch()` (inher
 
 **ConfigWatcher** (`src/mas/config.py`): Tracks `config.yaml` and `roles.yaml` modification times. Provides `has_changed()` and `mark_checked()` methods. Used by the daemon to implement config hot-reload with fallback on invalid config.
 
-**Web** (`src/mas/web/app.py`): Flask app. Renders board, task details (reads `.current_subtask` marker to show executing subtask), audit events, and cost totals. Exposes UI actions.
+**Patterns** (`src/mas/patterns.py`): Two JSONL aggregates regenerated every tick: `patterns.jsonl` (failure signatures from `tasks/failed/`) and `success_patterns.jsonl` (success patterns from `tasks/done/`). Failure records carry `signature`, `terminal_reason`, `goal_sample`, `count`, `last_seen`, `task_ids`, `rejected_attempts_sample`. Success records carry `signature`, `goal_sample`, `count`, `avg_duration_s`, `avg_cost_usd`, `task_ids`, `success_context`. `ProposerSignals` exposes top-20 failure patterns and top-10 success patterns; the proposer biases toward high-count success patterns and blocks goals matching repeated failure patterns. All errors are best-effort (logged at WARNING, never abort a tick).
+
+**Web** (`src/mas/web/app.py`): Flask app. Renders board, task details (reads `.current_subtask` marker to show executing subtask), audit events, cost totals, and success patterns (`/success-patterns`). Exposes UI actions.
 
 ## Key conventions
 
