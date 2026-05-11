@@ -254,6 +254,82 @@ def detect_anomalies(mas_dir, multiplier=2.0):
     return anomalies
 
 
+def compute_burn_rate(board_root) -> dict:
+    from datetime import datetime
+
+    board_root = Path(board_root)
+    tasks_dir = board_root / "tasks"
+
+    cost_by_date: dict[str, float] = {}
+
+    for col in ("proposed", "doing", "done", "failed"):
+        col_dir = tasks_dir / col
+        if not col_dir.exists():
+            continue
+        for task_dir in col_dir.iterdir():
+            if not task_dir.is_dir():
+                continue
+            audit_path = task_dir / "audit.jsonl"
+            if not audit_path.exists():
+                continue
+            with open(audit_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except Exception:
+                        continue
+                    if entry.get("event") != "subtask_complete":
+                        continue
+                    details = entry.get("details") or {}
+                    cost = details.get("cost_usd")
+                    if cost is None or float(cost) == 0.0:
+                        continue
+                    cost = float(cost)
+                    timestamp_str = entry.get("timestamp")
+                    if not timestamp_str:
+                        continue
+                    try:
+                        ts = datetime.fromisoformat(str(timestamp_str).replace("Z", "+00:00"))
+                    except Exception:
+                        continue
+                    date_str = ts.strftime("%Y-%m-%d")
+                    cost_by_date[date_str] = cost_by_date.get(date_str, 0.0) + cost
+
+    if not cost_by_date:
+        return {"daily_rate": 0.0, "total_spent": 0.0, "days_of_data": 0, "data_points": []}
+
+    dates = sorted(cost_by_date.keys())
+    from datetime import date as _date
+
+    earliest = _date.fromisoformat(dates[0])
+    latest = _date.fromisoformat(dates[-1])
+    days_spanned = (latest - earliest).days + 1
+    days_spanned = max(days_spanned, 3)
+
+    total_spent = sum(cost_by_date.values())
+    daily_rate = total_spent / days_spanned
+
+    data_points = [{"date": d, "cost": cost_by_date[d]} for d in dates]
+
+    return {
+        "daily_rate": daily_rate,
+        "total_spent": total_spent,
+        "days_of_data": days_spanned,
+        "data_points": data_points,
+    }
+
+
+def forecast_exhaustion_days(burn_rate_per_day: float, budget: float, total_spent: float) -> float | None:
+    if burn_rate_per_day <= 0:
+        return None
+    if total_spent >= budget:
+        return 0.0
+    return (budget - total_spent) / burn_rate_per_day
+
+
 def at_risk_tasks(board_root: Path, threshold: float = 0.8) -> list:
     """Return list of task IDs in doing/ whose spent budget >= threshold * budget.
 

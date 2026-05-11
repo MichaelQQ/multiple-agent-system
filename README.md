@@ -379,13 +379,15 @@ When the running total of `cost_usd` across completed subtasks reaches the effec
 
 `mas cost <task-id>` shows a `Budget:` line (e.g., `Budget: 0.012300 / 0.050000 (24.6% utilized)`) when `cost_budget_usd` is set on the task.
 
+- **Forecast threshold**: set `forecast_warning_days_threshold` in `.mas/config.yaml` (integer, default `7`). When the budget is projected to exhaust within this many days based on the computed daily burn rate, the web UI displays a depletion warning banner. Set to `0` to always show the warning when any burn rate exists; negative values are rejected by a Pydantic validator.
+
 ### Cost dashboard (Web UI)
 
-The web UI provides a cost dashboard with per-role breakdown and at-risk alerts:
+The web UI provides a cost dashboard with per-role breakdown, at-risk alerts, and budget forecast warnings:
 
 - **Board view (`/`)**: Shows an "At Risk" alert section flagging tasks that have exceeded 80% of their budget (graceful when budget is unset).
 - **Task detail view (`/task/<id>`)**: Displays a "Cost by Role" section breaking down costs by role (proposer/orchestrator/implementer/tester/evaluator), plus a per-subtask table with model, tokens in/out, duration, cost, and an anomaly badge for roles exceeding 2× their cost baseline (median/p75).
-- **Stats page (`/stats`)**: Shows a global cost summary with per-role aggregation alongside existing token/cost totals, plus a "Cost Anomalies" section flagging roles where costs exceed 2× the per-role baseline (median/p75).
+- **Stats page (`/stats`)**: Shows a global cost summary with per-role aggregation alongside existing token/cost totals, plus a "Cost Anomalies" section flagging roles where costs exceed 2× the per-role baseline (median/p75). Displays a forecast warning banner when the remaining budget is projected to exhaust within `forecast_warning_days_threshold` days based on the computed daily burn rate from audit data.
 
 Programmatic access is available via JSON endpoints:
 

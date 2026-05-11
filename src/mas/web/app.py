@@ -22,7 +22,14 @@ from pydantic import TypeAdapter
 from .. import board, cron, current_subtask, daemon, transitions, worktree
 from ..audit import read_events
 from ..config import load_config, project_dir, project_root, validate_environment
-from ..cost_helpers import aggregate_costs_by_role, at_risk_tasks, compute_role_baselines, detect_anomalies
+from ..cost_helpers import (
+    aggregate_costs_by_role,
+    at_risk_tasks,
+    compute_burn_rate,
+    compute_role_baselines,
+    detect_anomalies,
+    forecast_exhaustion_days,
+)
 from ..events import read_board_events
 from ..patterns import read_patterns
 from ..roles import goal_similarity
@@ -708,6 +715,37 @@ def create_app(project: Path | None = None) -> FastAPI:
                     cost_by_role[role]["tokens_in"] = int(cost_by_role[role]["tokens_in"]) + int(info["tokens_in"])
                     cost_by_role[role]["tokens_out"] = int(cost_by_role[role]["tokens_out"]) + int(info["tokens_out"])
         anomalies = detect_anomalies(mas)
+
+        # Budget forecast
+        forecast_days = None
+        burn_rate = 0.0
+        total_spent = 0.0
+        threshold = 7
+        budget = None
+        try:
+            cfg = load_config(mas)
+            budget = cfg.default_cost_budget_usd
+            threshold = cfg.forecast_warning_days_threshold
+        except Exception:
+            try:
+                import yaml
+                config_path = mas / "config.yaml"
+                if config_path.exists():
+                    raw = yaml.safe_load(config_path.read_text()) or {}
+                    budget = raw.get("default_cost_budget_usd", budget)
+                    threshold = raw.get("forecast_warning_days_threshold", threshold)
+            except Exception:
+                pass
+        try:
+            board_root = proj / "board"
+            burn_data = compute_burn_rate(board_root)
+            burn_rate = burn_data["daily_rate"]
+            total_spent = burn_data["total_spent"]
+            if budget is not None and burn_rate > 0:
+                forecast_days = forecast_exhaustion_days(burn_rate, budget, total_spent)
+        except Exception:
+            pass
+
         return templates.TemplateResponse(
             request,
             "stats.html",
@@ -718,6 +756,11 @@ def create_app(project: Path | None = None) -> FastAPI:
                 "since": since or "",
                 "error": error,
                 "project": str(proj),
+                "forecast_days": forecast_days,
+                "burn_rate": burn_rate,
+                "total_spent": total_spent,
+                "budget": budget,
+                "threshold": threshold,
             },
         )
 

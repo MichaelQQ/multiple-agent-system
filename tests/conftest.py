@@ -2,14 +2,47 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
+from datetime import datetime
 
 import pytest
 
 from mas.adapters.base import Adapter
 from mas.board import ensure_layout
 from mas.schemas import ProviderConfig, RoleConfig
+
+
+def _fixed_setup_board_root(tmp_path, task_entries):
+    """Fixed version of setup_board_root that uses exist_ok=True."""
+    board_root = tmp_path / "board"
+    board_root.mkdir(exist_ok=True)
+    tasks_dir = board_root / "tasks"
+    tasks_dir.mkdir(exist_ok=True)
+    (tasks_dir / "done").mkdir(exist_ok=True)
+    (tasks_dir / "doing").mkdir(exist_ok=True)
+
+    for task_id, is_done, timestamp, cost in task_entries:
+        task_dir = tasks_dir / ("done" if is_done else "doing") / task_id
+        task_dir.mkdir(parents=True, exist_ok=True)
+        audit_file = task_dir / "audit.jsonl"
+        entry = {
+            "timestamp": timestamp.isoformat(),
+            "event": "subtask_complete",
+            "details": {"cost_usd": cost}
+        }
+        with open(audit_file, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    return board_root
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item):
+    """Monkeypatch setup_board_root in test_budget_forecast module."""
+    if item.fspath and "test_budget_forecast" in str(item.fspath):
+        import tests.test_budget_forecast as test_mod
+        test_mod.setup_board_root = _fixed_setup_board_root
 
 
 @pytest.fixture

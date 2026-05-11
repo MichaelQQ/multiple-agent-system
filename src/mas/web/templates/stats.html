@@ -11,6 +11,10 @@
 </div>
 {% endif %}
 
+{% if forecast_days is not none and forecast_days <= threshold %}
+<div class="forecast-warning" style="background: #fef3cd; border: 1px solid #ffc107; color: #856404; padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; font-weight: 500;">⚠ {{ forecast_days|int }} days of budget remaining at current burn rate (${{ "%.2f"|format(burn_rate) }}/day)</div>
+{% endif %}
+
 <div class="actions">
   <form method="get">
     <label for="since">Since:</label>
