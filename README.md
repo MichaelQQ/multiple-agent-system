@@ -823,6 +823,10 @@ These exceptions provide context for debugging: file path, a snippet of the prob
 
 - Per-role `max_retries` (default 2) with the previous failure summary
   injected into the next attempt's `task.json` (`previous_failure` field).
+- **Pre-dispatch adapter health check failures** (e.g. CLI not found) write a
+  failure `result.json` and let the normal retry mechanism handle re-dispatch,
+  consuming the per-role `max_retries` budget. Previously, adapter
+  unavailability moved the task straight to `failed/`.
 - Evaluator verdict `needs_revision` appends a fresh
   implementer→tester→evaluator triplet, bounded by `max_revision_cycles`
   (default 2). Exhausted → parent moves to `failed/`.

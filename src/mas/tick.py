@@ -1611,7 +1611,6 @@ def _dispatch_role(
             cost_usd=None,
         )
         (task_dir / "result.json").write_text(result.model_dump_json(indent=2))
-        board.move(task_dir, env.mas / "tasks" / "failed" / task.id, reason="adapter_unavailable")
         return None
     board.write_pid(task_dir / "pids", role, role_cfg.provider, handle.pid)
     return handle.pid

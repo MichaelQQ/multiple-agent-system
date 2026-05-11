@@ -148,6 +148,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Pre-dispatch health check failures now trigger the retry/re-dispatch path** instead of immediately failing the task. Previously, adapter unavailability (`AdapterUnavailableError`) moved the task straight to `failed/`. Now it writes a failure `result.json` and lets the normal retry mechanism handle re-dispatch, consuming the per-role `max_retries` budget.
 - `board.move()` now appends a `state_transition` audit event to the destination task directory after every column move.
 - `tick._advance_one()` now appends a `dispatch` audit event to the parent task directory after every subtask dispatch.
 - `tick._handle_child_result()` now appends a `completion` audit event to the parent task directory when a subtask result is reaped.
