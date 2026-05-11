@@ -1,4 +1,6 @@
 import json
+import math
+import statistics
 from pathlib import Path
 from typing import Optional
 
@@ -115,6 +117,143 @@ def estimate_task_cost(board_root: Path, column: str, task_id: str) -> dict:
     return result
 
 
+def compute_role_baselines(mas_dir, percentile='median'):
+    """Scan all done/ tasks, read each subtask's result.json for cost_usd, group by role.
+
+    Returns dict mapping role -> baseline cost.
+    For 'median' uses statistics.median.
+    For 'p75' uses the 75th percentile.
+    Skip subtasks with null/zero cost.
+    """
+    mas_path = Path(mas_dir)
+
+    # Scan done/ tasks from both board layouts
+    done_dirs = [mas_path / "done", mas_path / "tasks" / "done"]
+
+    costs_by_role: dict[str, list[float]] = {}
+
+    for done_dir in done_dirs:
+        if not done_dir.exists():
+            continue
+        for task_dir in done_dir.iterdir():
+            if not task_dir.is_dir():
+                continue
+
+            task_json = task_dir / "task.json"
+            if not task_json.exists():
+                continue
+            try:
+                raw_task = json.loads(task_json.read_text())
+                role = raw_task.get("role")
+                if not role:
+                    continue
+            except Exception:
+                continue
+
+            result_json = task_dir / "result.json"
+            if not result_json.exists():
+                continue
+            try:
+                raw_result = json.loads(result_json.read_text())
+                cost = raw_result.get("cost_usd")
+                if cost is None or cost == 0:
+                    continue
+                cost = float(cost)
+            except Exception:
+                continue
+
+            if role not in costs_by_role:
+                costs_by_role[role] = []
+            costs_by_role[role].append(cost)
+
+    if not costs_by_role:
+        return {}
+
+    baselines = {}
+    for role, costs in costs_by_role.items():
+        if not costs:
+            continue
+        if percentile == 'median':
+            baselines[role] = statistics.median(costs)
+        elif percentile == 'p75':
+            sorted_costs = sorted(costs)
+            n = len(sorted_costs)
+            rank = math.ceil(0.75 * n)
+            baselines[role] = sorted_costs[rank - 1]
+        else:
+            raise ValueError(f"Unsupported percentile: {percentile}")
+
+    return baselines
+
+
+def detect_anomalies(mas_dir, multiplier=2.0):
+    """Compute baselines, then scan doing/ and done/ tasks.
+
+    For each subtask whose cost exceeds multiplier × baseline for its role,
+    emit a dict with keys: task_id, role, actual_cost, baseline, delta, multiplier_exceeded.
+    Return list sorted by delta descending.
+    """
+    mas_path = Path(mas_dir)
+    baselines = compute_role_baselines(mas_path)
+
+    if not baselines:
+        return []
+
+    anomalies = []
+
+    # Scan both board layouts
+    for col in ["doing", "done"]:
+        for base in [mas_path, mas_path / "tasks"]:
+            col_dir = base / col
+            if not col_dir.exists():
+                continue
+
+            for task_dir in col_dir.iterdir():
+                if not task_dir.is_dir():
+                    continue
+
+                task_json = task_dir / "task.json"
+                if not task_json.exists():
+                    continue
+                try:
+                    raw_task = json.loads(task_json.read_text())
+                    role = raw_task.get("role")
+                    if not role:
+                        continue
+                except Exception:
+                    continue
+
+                if role not in baselines:
+                    continue
+
+                result_json = task_dir / "result.json"
+                if not result_json.exists():
+                    continue
+                try:
+                    raw_result = json.loads(result_json.read_text())
+                    cost = raw_result.get("cost_usd")
+                    if cost is None or cost == 0:
+                        continue
+                    cost = float(cost)
+                except Exception:
+                    continue
+
+                baseline = baselines[role]
+                if cost > multiplier * baseline:
+                    anomalies.append({
+                        "task_id": task_dir.name,
+                        "role": role,
+                        "actual_cost": cost,
+                        "baseline": baseline,
+                        "delta": cost - baseline,
+                        "multiplier_exceeded": cost / baseline,
+                    })
+
+    anomalies.sort(key=lambda x: x["delta"], reverse=True)
+
+    return anomalies
+
+
 def at_risk_tasks(board_root: Path, threshold: float = 0.8) -> list:
     """Return list of task IDs in doing/ whose spent budget >= threshold * budget.
 
@@ -123,7 +262,6 @@ def at_risk_tasks(board_root: Path, threshold: float = 0.8) -> list:
     Handles missing budgets gracefully (skips those tasks).
     """
     at_risk = []
-    # Check both board_root/doing and board_root/tasks/doing
     for base in [board_root, board_root / "tasks"]:
         doing_dir = base / "doing"
         if not doing_dir.exists():

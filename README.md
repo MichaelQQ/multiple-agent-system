@@ -384,8 +384,8 @@ When the running total of `cost_usd` across completed subtasks reaches the effec
 The web UI provides a cost dashboard with per-role breakdown and at-risk alerts:
 
 - **Board view (`/`)**: Shows an "At Risk" alert section flagging tasks that have exceeded 80% of their budget (graceful when budget is unset).
-- **Task detail view (`/task/<id>`)**: Displays a "Cost by Role" section breaking down costs by role (proposer/orchestrator/implementer/tester/evaluator), plus a per-subtask table with model, tokens in/out, duration, and cost.
-- **Stats page (`/stats`)**: Shows a global cost summary with per-role aggregation alongside existing token/cost totals.
+- **Task detail view (`/task/<id>`)**: Displays a "Cost by Role" section breaking down costs by role (proposer/orchestrator/implementer/tester/evaluator), plus a per-subtask table with model, tokens in/out, duration, cost, and an anomaly badge for roles exceeding 2× their cost baseline (median/p75).
+- **Stats page (`/stats`)**: Shows a global cost summary with per-role aggregation alongside existing token/cost totals, plus a "Cost Anomalies" section flagging roles where costs exceed 2× the per-role baseline (median/p75).
 
 Programmatic access is available via JSON endpoints:
 

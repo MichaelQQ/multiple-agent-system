@@ -10,6 +10,7 @@
     {% if task.stuck %}<span class="pill pill-stuck">stuck</span>{% endif %}
     {% if task.cycle %}<span class="pill">cycle {{ task.cycle }}</span>{% endif %}
     {% if task.attempt and task.attempt > 1 %}<span class="pill">attempt {{ task.attempt }}</span>{% endif %}
+    {% if is_anomaly %}<span class="anomaly-badge">Cost Anomaly</span>{% endif %}
   </div>
   <div class="task-goal markdown-body">{{ task.goal | md }}</div>
 
