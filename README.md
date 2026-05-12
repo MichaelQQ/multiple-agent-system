@@ -684,7 +684,7 @@ The header navigation exposes seven pages:
 | Cron        | `/cron`               | Inspect, install, and uninstall the per-project cron entry        |
 | Config      | `/config/roles`       | Edit `.mas/roles.yaml` in-browser with YAML + pydantic validation |
 | Trace       | `/trace/<task_id>`    | Per-task stage-by-stage timeline: role, wall-clock, tokens, cost, and status for each subtask; in-flight stages highlighted |
-| Task detail | `/task/<id>`          | Task info, plan/subtasks, audit timeline, cost totals, and **logs viewer** with role filtering |
+| Task detail | `/task/<id>`          | Task info, plan/subtasks, audit timeline, cost totals, **logs viewer** with role filtering, and **similar completed tasks** panel |
 
 ### Logs viewer
 

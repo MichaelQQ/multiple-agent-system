@@ -173,6 +173,34 @@
 </details>
 {% endif %}
 
+{% if similar_tasks is defined %}
+<details class="card" open>
+  <summary><strong>Similar Completed Tasks</strong></summary>
+  {% if similar_tasks %}
+  <table style="margin-top:10px">
+    <tr>
+      <th>Task ID</th>
+      <th>Goal</th>
+      <th>Cost</th>
+      <th>Duration</th>
+      <th>Revisions</th>
+    </tr>
+    {% for s in similar_tasks %}
+    <tr>
+      <td class="mono"><a href="/task/{{ s.task_id }}">{{ s.task_id }}</a></td>
+      <td>{{ s.goal }}{% if s.goal|length >= 80 %}…{% endif %}</td>
+      <td class="mono">{% if s.cost_usd is not none %}${{ "%.2f"|format(s.cost_usd) }}{% else %}—{% endif %}</td>
+      <td class="mono">{% if s.duration_s is not none %}{{ "%.1f"|format(s.duration_s) }}s{% else %}—{% endif %}</td>
+      <td class="mono">{{ s.revision_count }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p style="margin-top:10px;color:var(--text-muted)">No similar tasks found</p>
+  {% endif %}
+</details>
+{% endif %}
+
 {% if cost_estimate %}
 <h2>Estimated Cost</h2>
 <table>

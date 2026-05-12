@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Similar Completed Tasks panel on task detail page**: the task detail view (`/task/<id>`) now shows a collapsible **Similar Completed Tasks** section listing up to 5 done/ tasks whose goals are semantically similar (Jaccard similarity ≥ 0.2, sorted by recency). Each row displays Task ID (linked), Goal, Cost, Duration, and Revisions. Implemented via `find_similar_tasks()` in `src/mas/web/app.py` using `goal_similarity` from `src/mas/roles.py`. Shows "No similar tasks found" when no matches exist.
+
 - **Cost estimation on task detail view**: the task detail page (`/task/<id>`) now shows an estimated cost per role before dispatch. Baselines are computed from historical per-role medians with ±standard deviation uncertainty, displayed as `$X.XX ± $Y.YY`. Estimates require ≥ 3 completed subtasks per role; otherwise "Estimate unavailable" is shown. The total is summed from per-role estimates. Implemented in `src/mas/cost_helpers.py` with `estimate_task_cost()`.
 
 - **Stuck-task detection**: the tick loop now detects tasks that are stuck and marks them accordingly.

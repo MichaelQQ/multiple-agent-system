@@ -334,6 +334,11 @@ def _task_detail(mas: Path, task_id: str, failure_filter: str | None = None) -> 
                         is_anomaly = True
                         break
 
+    try:
+        similar_tasks = find_similar_tasks(mas, task.goal)
+    except Exception:
+        similar_tasks = []
+
     return {
         "column": col,
         "task": task,
@@ -351,6 +356,7 @@ def _task_detail(mas: Path, task_id: str, failure_filter: str | None = None) -> 
         "current_subtask": current_subtask_info,
         "failure_patterns": failure_patterns,
         "failure_filter": failure_filter,
+        "similar_tasks": similar_tasks,
     }
 
 
@@ -946,6 +952,72 @@ def create_app(project: Path | None = None) -> FastAPI:
         )
 
     return app
+
+
+def _count_revisions(task_dir: Path) -> int:
+    """Count result.failed-*.json files in task's own subtasks/ directory."""
+    count = 0
+    subtasks = task_dir / "subtasks"
+    if subtasks.exists():
+        for child_dir in subtasks.iterdir():
+            if child_dir.is_dir():
+                count += len(list(child_dir.glob("result.failed-*.json")))
+    return count
+
+
+def find_similar_tasks(
+    mas_dir: Path,
+    goal: str,
+    limit: int = 5,
+    threshold: float = 0.2,
+) -> list[dict]:
+    """Scan done/ tasks, compute goal_similarity, return top matches sorted by recency."""
+    matches: list[dict] = []
+
+    for tdir in board.list_column(mas_dir, "done"):
+        try:
+            task = board.read_task(tdir)
+        except Exception:
+            continue
+
+        try:
+            score = goal_similarity(goal, task.goal)
+        except Exception:
+            continue
+
+        if score < threshold:
+            continue
+
+        try:
+            result = board.read_result(tdir)
+        except Exception:
+            result = None
+
+        try:
+            revision_count = _count_revisions(tdir)
+        except Exception:
+            revision_count = 0
+
+        try:
+            mtime = (tdir / "task.json").stat().st_mtime
+        except Exception:
+            mtime = 0.0
+
+        matches.append({
+            "task_id": task.id,
+            "goal": task.goal[:80],
+            "cost_usd": result.cost_usd if result else None,
+            "duration_s": result.duration_s if result else None,
+            "revision_count": revision_count,
+            "similarity_score": score,
+            "_mtime": mtime,
+        })
+
+    matches.sort(key=lambda m: m["_mtime"], reverse=True)
+    capped = matches[:limit]
+    for m in capped:
+        m.pop("_mtime", None)
+    return capped
 
 
 def _reset_task_state(task_dir: Path) -> None:
