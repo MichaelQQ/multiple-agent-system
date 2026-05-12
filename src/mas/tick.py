@@ -19,6 +19,7 @@ from .ids import task_id as new_task_id
 from .logging import get_task_logger
 from .proposals import RejectedProposal, write_rejected_proposal
 from .patterns import read_patterns
+from .errors import PlanParseError
 from .roles import _list_goals, _list_goals_with_meta, find_similar_goal, gather_proposer_signals, goal_similarity, parse_plan, render_prompt
 from .schemas import BaseModel, ConfigDict, MasConfig, Plan, ProposalHandoff, Result, Role, StuckDetectionConfig, Task
 
@@ -26,6 +27,10 @@ log = logging.getLogger("mas.tick")
 
 
 class LockBusy(RuntimeError):
+    pass
+
+
+class InvalidPlanError(ValueError):
     pass
 
 
@@ -267,6 +272,16 @@ def _synthesize_timeout_result(task_dir: Path, role: str, timeout_s: int) -> Non
 # --- 2. Advance -------------------------------------------------------------
 
 
+def _validate_plan(plan: Plan, config: MasConfig) -> None:
+    if not plan.subtasks:
+        raise InvalidPlanError("plan has no subtasks")
+    unknown_roles = sorted({s.role for s in plan.subtasks if s.role not in config.roles})
+    if unknown_roles:
+        raise InvalidPlanError(
+            f"plan references unknown roles: {unknown_roles}"
+        )
+
+
 def _advance_doing(env: TickEnv) -> None:
     for task_dir_ in board.list_column(env.mas, "doing"):
         try:
@@ -343,7 +358,24 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
             _dispatch_role(env, parent_task, parent_dir, wt, role="orchestrator")
         return
 
-    plan = parse_plan(plan_path, parent_task.id)
+    try:
+        plan = parse_plan(plan_path, parent_task.id)
+        _validate_plan(plan, env.cfg)
+    except (PlanParseError, InvalidPlanError) as e:
+        parent_result = Result(
+            task_id=parent_task.id,
+            status="failure",
+            summary=str(e),
+            handoff={
+                "terminal_reason": "invalid_plan",
+                "error": str(e),
+            },
+            duration_s=0.0,
+        )
+        (parent_dir / "result.json").write_text(parent_result.model_dump_json(indent=2))
+        failed_dir = env.mas / "tasks" / "failed" / parent_task.id
+        board.move(parent_dir, failed_dir, reason="invalid_plan")
+        return
     if _expand_evaluator_quorum(plan, env.cfg):
         plan_path.write_text(plan.model_dump_json(indent=2))
     subtasks_root = parent_dir / "subtasks"

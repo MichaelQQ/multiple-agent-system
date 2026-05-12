@@ -162,6 +162,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `ResultReadError` - raised when reading a malformed or invalid `result.json`
 - All custom exceptions include context (file path, raw content snippet, and root cause) for clearer debugging
 
+### Added
+
+- **Plan validation**: orchestrator-produced `plan.json` is now validated against the `Plan` schema and configured roles before subtask dispatch.
+  - New `InvalidPlanError(ValueError)` raised when a plan fails validation.
+  - `_validate_plan(plan, config)` in `tick.py` checks for empty subtask lists and references to roles not present in `.mas/roles.yaml`.
+  - `_advance_one()` catches both `PlanParseError` (from `parse_plan`) and `InvalidPlanError` (from `_validate_plan`), writes a failure `result.json`, and moves the parent task to `failed/` with `terminal_reason=invalid_plan`. This prevents tasks from getting stuck in `doing/` with malformed or misconfigured plans.
+
 ### Changed
 
 - **Pre-dispatch health check failures now trigger the retry/re-dispatch path** instead of immediately failing the task. Previously, adapter unavailability (`AdapterUnavailableError`) moved the task straight to `failed/`. Now it writes a failure `result.json` and lets the normal retry mechanism handle re-dispatch, consuming the per-role `max_retries` budget.
