@@ -178,6 +178,14 @@ def validate_config(cfg: MasConfig, mas_dir: Path) -> list[ValidationIssue]:
                 message=f"Webhook URL must use http or https scheme, got: {wh.url!r}",
             ))
 
+    if cfg.alert_webhooks:
+        for scheme, url in [("slack", cfg.alert_webhooks.slack), ("discord", cfg.alert_webhooks.discord)]:
+            if url is not None and not (url.startswith("http://") or url.startswith("https://")):
+                issues.append(ValidationIssue(
+                    field=f"alert_webhooks.{scheme}",
+                    message=f"Webhook URL must use http or https scheme, got: {url!r}",
+                ))
+
     if cfg.daemon.log_max_bytes <= 0:
         issues.append(ValidationIssue(
             field="daemon.log_max_bytes",

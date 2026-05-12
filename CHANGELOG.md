@@ -11,6 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Similar Completed Tasks panel on task detail page**: the task detail view (`/task/<id>`) now shows a collapsible **Similar Completed Tasks** section listing up to 5 done/ tasks whose goals are semantically similar (Jaccard similarity ≥ 0.2, sorted by recency). Each row displays Task ID (linked), Goal, Cost, Duration, and Revisions. Implemented via `find_similar_tasks()` in `src/mas/web/app.py` using `goal_similarity` from `src/mas/roles.py`. Shows "No similar tasks found" when no matches exist.
 
+- **Slack/Discord alert webhooks**: new `alert_webhooks` config section supporting `slack` and `discord` webhook URLs for operational alerts.
+  - New `AlertWebhooksConfig` schema in `src/mas/schemas.py` with optional `slack` and `discord` URL fields.
+  - New `MasConfig.alert_webhooks` field (`AlertWebhooksConfig | None`, default `None`).
+  - Two alert event types: `cost_anomaly` (role cost >2× baseline, checked every tick via `_check_cost_anomalies()` in `tick.py`) and `hung_subtask` (task stuck on `.current_subtask` or idle timeout).
+  - `format_slack_payload()` returns a `blocks`-based payload with emoji header and mrkdwn fields (Task ID, Role, Reason, Cost, Timestamp).
+  - `format_discord_payload()` returns an `embeds`-based payload with colour-coded embed (red for cost_anomaly, amber for hung_subtask) and inline fields.
+  - `send_alert()` dispatches to both URLs concurrently via `ThreadPoolExecutor` (max 2 workers) with 10 s HTTP timeout; failures logged at `WARNING`, never blocking the tick loop.
+  - Per-event-object dedup prevents re-sending the same anomaly in repeated ticks.
+  - URL validation in `config.py` (must use `http://` or `https://` scheme).
+  - New `src/mas/alert_notifier.py` module.
+  - Templated section in `templates/config.yaml` (commented out by default).
+
 - **Cost estimation on task detail view**: the task detail page (`/task/<id>`) now shows an estimated cost per role before dispatch. Baselines are computed from historical per-role medians with ±standard deviation uncertainty, displayed as `$X.XX ± $Y.YY`. Estimates require ≥ 3 completed subtasks per role; otherwise "Estimate unavailable" is shown. The total is summed from per-role estimates. Implemented in `src/mas/cost_helpers.py` with `estimate_task_cost()`.
 
 - **Stuck-task detection**: the tick loop now detects tasks that are stuck and marks them accordingly.

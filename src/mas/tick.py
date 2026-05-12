@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
-from . import audit, board, current_subtask, graph as _graph, state as _state, summary as _summary, transitions, worktree
+from . import alert_notifier, audit, board, current_subtask, graph as _graph, state as _state, summary as _summary, transitions, worktree
 from .adapters import AdapterUnavailableError, get_adapter
 from .config import load_config, project_root, project_dir, validate_config, ConfigWatcher
 from .ids import task_id as new_task_id
@@ -84,6 +84,23 @@ def _is_task_stuck(task_dir: Path, config: StuckDetectionConfig) -> tuple[bool, 
             pass
 
     return (False, '')
+
+
+def _check_cost_anomalies(env: TickEnv, parent_dir: Path) -> None:
+    """Check for cost anomalies and fire alerts."""
+    if not env.cfg.alert_webhooks:
+        return
+    from .cost_helpers import detect_anomalies
+    anomalies = detect_anomalies(env.mas)
+    for anomaly in anomalies:
+        alert_notifier.send_alert(env.cfg.alert_webhooks, {
+            "task_id": anomaly["task_id"],
+            "event_type": "cost_anomaly",
+            "reason": f"cost anomaly: actual={anomaly['actual_cost']}, baseline={anomaly['baseline']}, multiplier={anomaly['multiplier_exceeded']:.1f}x",
+            "role": anomaly["role"],
+            "cost": anomaly["actual_cost"],
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
 
 
 class TickEnv(BaseModel):
@@ -292,6 +309,15 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
         )
         parent_task.stuck = True
         board.write_task(parent_dir, parent_task)
+        if env.cfg.alert_webhooks:
+            alert_notifier.send_alert(env.cfg.alert_webhooks, {
+                "task_id": parent_task.id,
+                "event_type": "hung_subtask",
+                "reason": reason,
+                "role": parent_task.role,
+                "cost": None,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
 
     plan_path = parent_dir / "plan.json"
     wt = parent_dir / "worktree"
@@ -437,6 +463,7 @@ def _advance_one(env: TickEnv, parent_dir: Path) -> None:
         subtask_id=next_child.id,
         summary=f"dispatched {next_child.role}",
     )
+    _check_cost_anomalies(env, parent_dir)
 
 
 def _resolve_test_command(

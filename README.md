@@ -190,6 +190,35 @@ Each delivery is a JSON POST with these fields:
 
 Delivery is best-effort and non-blocking. Non-2xx responses, timeouts, and connection errors are caught and logged at `WARNING` level; they never block the tick loop.
 
+### Alert webhooks (Slack / Discord)
+
+Separate from the generic board-transition webhooks above, you can configure
+dedicated Slack and/or Discord webhook URLs for operational alerts. Configure
+in `.mas/config.yaml`:
+
+```yaml
+alert_webhooks:
+  slack: https://hooks.slack.com/services/T00/B00/xxx
+  discord: https://discord.com/api/webhooks/123/abc
+```
+
+At least one URL must be set for alerts to fire; both are optional. URLs are
+validated at startup — they must use `http://` or `https://` scheme.
+
+**Triggering events:**
+
+| Event | When | Payload details |
+|---|---|---|
+| `cost_anomaly` | A role's cost exceeds **2×** its per-role baseline (computed by `detect_anomalies()` in `src/mas/cost_helpers.py`). Checked once per tick via `_check_cost_anomalies()`. | Dispatched per anomalous role with `task_id`, `reason` (actual/baseline/multiplier), `role`, `cost` (actual), `timestamp`. |
+| `hung_subtask` | The stuck-task detection (`_is_task_stuck()`) marks a task stuck via `.current_subtask` or idle timeout, and `alert_webhooks` is configured. | Dispatched with `task_id`, `reason` (stuck description), `role`, `cost` (null), `timestamp`. |
+
+**Payload format:**
+
+- **Slack**: JSON with a `blocks` array. Top section uses emoji (`:rotating_light:` for cost_anomaly, `:hourglass_flowing_sand:` for hung_subtask) and bold text `MAS Alert: {event_type}`. Fields section renders Task ID, Role, Reason, Cost, and Timestamp in mrkdwn.
+- **Discord**: JSON with an `embeds` array. Single embed colored `0xFF0000` (cost_anomaly) or `0xFFAA00` (hung_subtask), title `MAS Alert: {event_type}`, and inline fields for Task ID, Event Type, Role, Reason, Cost, and Timestamp.
+
+**Delivery:** `send_alert()` fires both URLs concurrently using a shared `ThreadPoolExecutor` (max 2 workers). Each delivery has a 10-second HTTP timeout. Failures are logged at `WARNING` and never block the tick loop. Deduplication is applied per-event-object identity so repeated ticks do not re-send the same anomaly event.
+
 ### Stuck-task detection
 
 The tick loop detects tasks that appear stuck and marks them accordingly:
