@@ -19,7 +19,7 @@ Python 3.11+. `mise.toml` pins 3.12. No linter/formatter configured yet.
 
 ## Architecture
 
-**Tick loop** (`src/mas/tick.py`): The core. Single-pass, flock-guarded. Sequence: acquire lock → reap dead workers → advance doing/ tasks → maybe dispatch proposer → release lock. Each task in `doing/` is advanced through a state machine: ensure worktree → dispatch orchestrator → orchestrator writes `plan.json` with subtask specs → dispatch subtasks sequentially (implementer → tester → evaluator) → finalize parent to `done/`. A `.current_subtask` marker file is written on subtask dispatch and cleaned up when the result is collected.
+**Tick loop** (`src/mas/tick.py`): The core. Single-pass, flock-guarded. Sequence: acquire lock → reap dead workers → advance doing/ tasks → maybe dispatch proposer → release lock. Each task in `doing/` is advanced through a state machine: ensure worktree → dispatch orchestrator → orchestrator writes `plan.json` with subtask specs → validate plan (`_validate_plan` catches empty subtasks and unknown roles; moves parent to `failed/` with `terminal_reason=invalid_plan` on failure) → dispatch subtasks sequentially (implementer → tester → evaluator) → finalize parent to `done/`. A `.current_subtask` marker file is written on subtask dispatch and cleaned up when the result is collected.
 
 **Board** (`src/mas/board.py`): Directory-as-kanban helpers. Four columns: `proposed/`, `doing/`, `done/`, `failed/`. Moves are `shutil.move` with transition logging. PID files track live workers (`pids/{role}.{provider}.pid`).
 

@@ -286,7 +286,10 @@ Validation runs automatically before `mas tick` and `mas daemon start` to preven
 
 A tick is safe to run any time — it takes a flock, reaps dead workers,
 advances the state machine, then dispatches new work within per-provider
-concurrency caps.
+concurrency caps. Plans from the orchestrator (`plan.json`) are validated
+against the `Plan` schema after parsing; if the plan has no subtasks or
+references unknown roles the parent moves to `failed/` with
+`terminal_reason=invalid_plan`.
 
 ### Diagnostics
 
@@ -815,7 +818,8 @@ mas uses custom exception types in `src/mas/errors.py` for clear, actionable err
 
 | Exception         | Raised By                  | Includes                                         |
 |------------------|----------------------------|--------------------------------------------------|
-| `PlanParseError` | `parse_plan()` in roles.py | file path, content snippet, root cause            |
+| `PlanParseError`  | `parse_plan()` in roles.py  | file path, content snippet, root cause            |
+| `InvalidPlanError`| `_validate_plan()` in tick.py| role set, reason string                            |
 | `TaskReadError`  | `read_task()` in board.py  | file path, content snippet, root cause          |
 | `ResultReadError`| `read_result()` in board.py| file path, content snippet, root cause          |
 
@@ -829,6 +833,10 @@ These exceptions provide context for debugging: file path, a snippet of the prob
   failure `result.json` and let the normal retry mechanism handle re-dispatch,
   consuming the per-role `max_retries` budget. Previously, adapter
   unavailability moved the task straight to `failed/`.
+- Plan validation: after parsing `plan.json` from the orchestrator,
+  `_validate_plan()` checks that the plan has at least one subtask and that
+  every subtask role is present in `.mas/roles.yaml`. Invalid plans move the
+  parent to `failed/` with `terminal_reason=invalid_plan`.
 - Evaluator verdict `needs_revision` appends a fresh
   implementer→tester→evaluator triplet, bounded by `max_revision_cycles`
   (default 2). Exhausted → parent moves to `failed/`.

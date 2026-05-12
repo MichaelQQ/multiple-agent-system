@@ -8,6 +8,7 @@ Tests use the same patterns as tests/test_orphan.py:
 """
 
 import errno
+import json
 import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -46,6 +47,24 @@ from mas.tick import (
     run_tick,
 )
 
+
+# ---------------------------------------------------------------------------
+# Plan-validation stubs (injected into mas.tick until real impl exists)
+# ---------------------------------------------------------------------------
+import mas.tick as _tick_mod
+
+if not hasattr(_tick_mod, "InvalidPlanError"):
+
+    class _StubInvalidPlanError(ValueError):
+        def __init__(self, message: str = ""):
+            super().__init__(message)
+    _tick_mod.InvalidPlanError = _StubInvalidPlanError
+
+if not hasattr(_tick_mod, "_validate_plan"):
+
+    def _stub_validate_plan(plan, config):
+        raise NotImplementedError("_validate_plan stub")
+    _tick_mod._validate_plan = _stub_validate_plan
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -2951,3 +2970,103 @@ def test_advance_one_expands_orchestrator_plan(tmp_path: Path):
     assert [s.id for s in refreshed.subtasks] == [
         "impl-1", "eval-1-q1", "eval-1-q2",
     ]
+
+
+# ---------------------------------------------------------------------------
+# 14. Plan validation (_validate_plan / InvalidPlanError)
+# ---------------------------------------------------------------------------
+
+def test_validate_plan_valid_passes():
+    """Valid Plan passes _validate_plan without raising."""
+    from mas.tick import _validate_plan
+    plan = Plan(
+        parent_id="x", summary="s",
+        subtasks=[SubtaskSpec(id="s1", role="implementer", goal="g")],
+    )
+    config = _cfg()
+    _validate_plan(plan, config)
+
+
+def test_validate_plan_empty_subtasks_raises():
+    """Plan with empty subtasks raises InvalidPlanError."""
+    from mas.tick import _validate_plan, InvalidPlanError
+    plan = Plan(parent_id="x", summary="s", subtasks=[])
+    config = _cfg()
+    with pytest.raises(InvalidPlanError, match="subtasks"):
+        _validate_plan(plan, config)
+
+
+def test_validate_plan_unknown_role_raises():
+    """Plan referencing unconfigured role raises InvalidPlanError."""
+    from mas.tick import _validate_plan, InvalidPlanError
+    plan = Plan(
+        parent_id="x", summary="s",
+        subtasks=[SubtaskSpec(id="s1", role="arbiter", goal="g")],
+    )
+    config = _cfg()  # no "arbiter" role
+    with pytest.raises(InvalidPlanError) as exc:
+        _validate_plan(plan, config)
+    assert "arbiter" in str(exc.value)
+
+
+def test_validate_plan_invalid_json_moves_to_failed(tmp_path: Path):
+    """plan.json with invalid JSON causes parent to move to failed/."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent_id = "20260512-bij-aaaa"
+    parent = board.task_dir(mas, "doing", parent_id)
+    parent.mkdir(parents=True)
+    board.write_task(parent, Task(id=parent_id, role="orchestrator", goal="g"))
+    (parent / "worktree").mkdir()
+    (parent / "plan.json").write_text("{invalid}")
+
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg())
+
+    with patch("mas.tick._dispatch_role"):
+        _advance_doing(env)
+
+    assert (mas / "tasks" / "failed" / parent_id).exists()
+
+
+def test_validate_plan_missing_subtasks_moves_to_failed(tmp_path: Path):
+    """plan.json missing 'subtasks' → parent moved to failed/."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent_id = "20260512-bms-aaaa"
+    parent = board.task_dir(mas, "doing", parent_id)
+    parent.mkdir(parents=True)
+    board.write_task(parent, Task(id=parent_id, role="orchestrator", goal="g"))
+    (parent / "worktree").mkdir()
+    (parent / "plan.json").write_text(
+        json.dumps({"parent_id": parent_id, "summary": "s"})
+    )
+
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg())
+
+    with patch("mas.tick._dispatch_role"):
+        _advance_doing(env)
+
+    assert (mas / "tasks" / "failed" / parent_id).exists()
+
+
+def test_validate_plan_unknown_role_moves_to_failed(tmp_path: Path):
+    """Subtasks referencing unconfigured role → parent moved to failed/."""
+    mas = tmp_path / ".mas"
+    board.ensure_layout(mas)
+    parent_id = "20260512-unk-aaaa"
+    parent = board.task_dir(mas, "doing", parent_id)
+    parent.mkdir(parents=True)
+    board.write_task(parent, Task(id=parent_id, role="orchestrator", goal="g"))
+    (parent / "worktree").mkdir()
+    plan = Plan(
+        parent_id=parent_id, summary="s",
+        subtasks=[SubtaskSpec(id="s1", role="arbiter", goal="g")],
+    )
+    (parent / "plan.json").write_text(plan.model_dump_json())
+
+    env = TickEnv(repo=tmp_path, mas=mas, cfg=_cfg())
+
+    with patch("mas.tick._dispatch_role"):
+        _advance_doing(env)
+
+    assert (mas / "tasks" / "failed" / parent_id).exists()
