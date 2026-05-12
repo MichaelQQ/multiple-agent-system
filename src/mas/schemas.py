@@ -221,6 +221,13 @@ class WebhookConfig(BaseModel):
     timeout_s: int = Field(default=10, ge=1, le=120)
 
 
+class AlertWebhooksConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    slack: str | None = None
+    discord: str | None = None
+
+
 class DaemonConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -255,6 +262,7 @@ class MasConfig(BaseModel):
     plan_consensus_threshold_usd: float | None = None
     max_replans: int = 1
     webhooks: list[WebhookConfig] = Field(default_factory=list)
+    alert_webhooks: AlertWebhooksConfig | None = None
     daemon: DaemonConfig = Field(default_factory=DaemonConfig)
     stuck_detection: StuckDetectionConfig = Field(default_factory=StuckDetectionConfig)
 

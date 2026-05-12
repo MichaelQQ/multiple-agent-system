@@ -38,3 +38,10 @@ proposer_signals:
 # daemon:
 #   log_max_bytes: 10485760        # rotate .mas/logs/daemon.log at 10 MiB
 #   log_backup_count: 5            # keep daemon.log.1 … daemon.log.5
+
+# alert_webhooks:
+#   Slack/Discord webhook URLs for operational alerts (cost anomalies, hung subtasks).
+#   At least one must be set for alerts to fire; both are optional.
+#   Alerts are dispatched concurrently via ThreadPoolExecutor with 10s HTTP timeout.
+#   slack: https://hooks.slack.com/services/T00/B00/xxx
+#   discord: https://discord.com/api/webhooks/123/abc
